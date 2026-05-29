@@ -1,0 +1,35 @@
+{
+  "name": "telegram-chat-summarizer",
+  "version": "0.1.0",
+  "description": "Telegram group bot that stores group messages in SQLite and summarizes recent topics with Kimi K2.6 Turbo via Fireworks.",
+  "homepage": "https://t.me/chad_summary_bot",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/backmeupplz/telegram-chat-summarizer.git"
+  },
+  "keywords": [
+    "telegram-bot",
+    "grammy",
+    "bun",
+    "sqlite",
+    "kimi",
+    "fireworks",
+    "summaries"
+  ],
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "bun src/index.ts",
+    "dev": "bun --watch src/index.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "grammy": "^1.36.3",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.15",
+    "typescript": "^5.8.3"
+  }
+}
