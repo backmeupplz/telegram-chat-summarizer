@@ -9,6 +9,7 @@ Bot: [@chad_summary_bot](https://t.me/chad_summary_bot)
 - Stores incoming text, captions, and basic media placeholders separately per Telegram group.
 - Lets any group member run `/summary`, `/summary 24h`, `/summary 7d`, or `/summary 100`.
 - Uses Kimi K2.6 Turbo through Fireworks for concise summaries.
+- Streams summaries by editing a plain-text placeholder message.
 - Keeps secrets in environment variables, not in git.
 
 Important Telegram limitation: bots can only store messages they receive after being added. The bot needs permission to receive normal group messages.

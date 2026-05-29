@@ -224,7 +224,7 @@ async function editSummaryMessage(ctx: Context, messageId: number, text: string)
   }
 
   await ctx.api
-    .editMessageText(ctx.chat.id, messageId, fitTelegramText(text))
+    .editMessageText(ctx.chat.id, messageId, fitTelegramText(toPlainTelegramText(text)))
     .catch(() => undefined)
 }
 
@@ -233,4 +233,24 @@ function fitTelegramText(text: string) {
     return text
   }
   return text.slice(0, TELEGRAM_TEXT_LIMIT - 20).trimEnd() + '\n\n[truncated]'
+}
+
+function toPlainTelegramText(text: string) {
+  return text
+    .replace(/```[a-zA-Z]*\n?/g, '')
+    .replace(/```/g, '')
+    .replace(/\[([^\]]+)]\(([^)]+)\)/g, '$1: $2')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/(^|\s)\*([^*]+)\*(\s|$)/g, '$1$2$3')
+    .split('\n')
+    .map((line) =>
+      line
+        .replace(/^\s{0,3}#{1,6}\s+/, '')
+        .replace(/^\s{0,3}>\s?/, '')
+        .replace(/^\s{0,3}[-*+]\s+/, '')
+    )
+    .join('\n')
+    .trim()
 }
