@@ -37,6 +37,10 @@ Copy `.env.example` to `.env` locally, or set these variables in Easypanel:
 
 Use a persistent volume for `DATABASE_PATH`, for example `/app/data/chat-summaries.sqlite`.
 
+## Deployment
+
+Use the included Dockerfile on Hetzner Easypanel. Set the env vars above in Easypanel and mount a persistent data volume at `/app/data`.
+
 ## Development
 
 ```bash
