@@ -6,6 +6,9 @@ type ChatCompletionResponse = {
     message?: {
       content?: string | null
     }
+    delta?: {
+      content?: string | null
+    }
   }>
 }
 
@@ -15,16 +18,30 @@ export async function summarizeMessages(params: {
   summaryRequest: string
   messages: StoredMessage[]
 }) {
-  const response = await fetch(`${config.FIREWORKS_BASE_URL}/chat/completions`, {
+  let result = ''
+  for await (const delta of streamSummaryMessages(params)) {
+    result += delta
+  }
+  return result.trim()
+}
+
+export async function* streamSummaryMessages(params: {
+  chatTitle: string
+  windowLabel: string
+  summaryRequest: string
+  messages: StoredMessage[]
+}) {
+  const response = await fetch(config.FIREWORKS_BASE_URL + '/chat/completions', {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${config.FIREWORKS_API_KEY}`,
+      Authorization: 'Bearer ' + config.FIREWORKS_API_KEY,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
       model: config.FIREWORKS_MODEL,
       temperature: config.AI_TEMPERATURE,
       max_tokens: config.AI_MAX_TOKENS,
+      stream: true,
       messages: [
         {
           role: 'system',
@@ -50,17 +67,15 @@ export async function summarizeMessages(params: {
   if (!response.ok) {
     const body = await response.text()
     throw new Error(
-      `Fireworks request failed: ${response.status} ${body.slice(0, 300)}`
+      'Fireworks request failed: ' + response.status + ' ' + body.slice(0, 300)
     )
   }
 
-  const data = (await response.json()) as ChatCompletionResponse
-  const content = data.choices?.[0]?.message?.content?.trim()
-  if (!content) {
-    throw new Error('Fireworks response did not contain message content')
+  if (!response.body) {
+    throw new Error('Fireworks response did not contain a stream body')
   }
 
-  return content
+  yield* parseChatCompletionStream(response.body)
 }
 
 function buildSummaryPrompt(params: {
@@ -72,13 +87,13 @@ function buildSummaryPrompt(params: {
   const lines = params.messages.map((message) => {
     const timestamp = new Date(message.messageDate * 1000).toISOString()
     const body = message.text.replace(/\s+/g, ' ').trim()
-    return `[${timestamp}] ${message.displayName}: ${body}`
+    return '[' + timestamp + '] ' + message.displayName + ': ' + body
   })
 
   return [
-    `Chat: ${params.chatTitle}`,
-    `Window: ${params.windowLabel}`,
-    `Summary request: ${params.summaryRequest || '(none)'}`,
+    'Chat: ' + params.chatTitle,
+    'Window: ' + params.windowLabel,
+    'Summary request: ' + (params.summaryRequest || '(none)'),
     'Language: use the language people are using in the chat unless the summary request plainly asks for another language.',
     '',
     'Return:',
@@ -89,4 +104,53 @@ function buildSummaryPrompt(params: {
     'Messages:',
     lines.join('\n'),
   ].join('\n')
+}
+
+async function* parseChatCompletionStream(body: ReadableStream<Uint8Array>) {
+  const decoder = new TextDecoder()
+  const reader = body.getReader()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) {
+      break
+    }
+
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed || !trimmed.startsWith('data:')) {
+        continue
+      }
+
+      const payload = trimmed.slice('data:'.length).trim()
+      if (payload === '[DONE]') {
+        return
+      }
+
+      const data = JSON.parse(payload) as ChatCompletionResponse
+      const content =
+        data.choices?.[0]?.delta?.content ?? data.choices?.[0]?.message?.content
+      if (content) {
+        yield content
+      }
+    }
+  }
+
+  const tail = buffer.trim()
+  if (tail.startsWith('data:')) {
+    const payload = tail.slice('data:'.length).trim()
+    if (payload && payload !== '[DONE]') {
+      const data = JSON.parse(payload) as ChatCompletionResponse
+      const content =
+        data.choices?.[0]?.delta?.content ?? data.choices?.[0]?.message?.content
+      if (content) {
+        yield content
+      }
+    }
+  }
 }

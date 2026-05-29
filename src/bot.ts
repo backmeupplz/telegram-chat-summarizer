@@ -1,7 +1,7 @@
 import { Bot, type Context } from 'grammy'
 import { config } from './config'
 import { addMessage, ensureChat, recentMessages } from './db'
-import { summarizeMessages } from './ai'
+import { streamSummaryMessages } from './ai'
 import { resolveSummaryWindow } from './summaryArgs'
 
 const helpText = [
@@ -17,6 +17,9 @@ const helpText = [
 ].join('\n')
 
 const runningSummaries = new Set<number>()
+const SUMMARY_EDIT_INTERVAL_MS = 1200
+const SUMMARY_MIN_FIRST_EDIT_CHARS = 40
+const TELEGRAM_TEXT_LIMIT = 3900
 
 export function createBot() {
   const bot = new Bot(config.TELEGRAM_BOT_TOKEN)
@@ -95,7 +98,15 @@ async function sendSummary(ctx: Context) {
   }
 
   runningSummaries.add(ctx.chat.id)
+  let placeholderMessageId: number | null = null
   try {
+    const placeholder = await ctx.reply('Summarizing...', {
+      reply_parameters: ctx.message
+        ? { message_id: ctx.message.message_id }
+        : undefined,
+    })
+    placeholderMessageId = placeholder.message_id
+
     const summaryRequest = String(ctx.match ?? '').trim()
     const window = resolveSummaryWindow(summaryRequest, Math.floor(Date.now() / 1000), {
       defaultMessages: config.SUMMARY_DEFAULT_MESSAGES,
@@ -107,27 +118,51 @@ async function sendSummary(ctx: Context) {
       sinceUnixSeconds: window.sinceUnixSeconds,
     }).filter((message) => !message.text.startsWith('/summary'))
 
-    if (messages.length < 3) {
-      await ctx.reply(
-        'I do not have enough stored group messages for a useful summary yet. Make sure I can read normal group messages.'
+    if (messages.length < 1) {
+      await editSummaryMessage(
+        ctx,
+        placeholder.message_id,
+        'I do not have any stored group messages to summarize yet. Make sure I can read normal group messages.'
       )
       return
     }
 
-    await ctx.reply('Summarizing...')
-    const summary = await summarizeMessages({
+    let accumulated = ''
+    let lastEditAt = 0
+    for await (const delta of streamSummaryMessages({
       chatTitle: chatTitle(ctx),
       windowLabel: window.label,
       summaryRequest,
       messages,
-    })
-    await replyInChunks(ctx, summary)
+    })) {
+      accumulated += delta
+      if (accumulated.length < SUMMARY_MIN_FIRST_EDIT_CHARS) {
+        continue
+      }
+
+      const now = Date.now()
+      if (now - lastEditAt >= SUMMARY_EDIT_INTERVAL_MS) {
+        lastEditAt = now
+        await editSummaryMessage(ctx, placeholder.message_id, accumulated + ' ...')
+      }
+    }
+
+    await editSummaryMessage(
+      ctx,
+      placeholder.message_id,
+      accumulated.trim() || 'Kimi returned an empty summary.'
+    )
   } catch (error) {
     console.error('summary failed', {
       chatId: ctx.chat.id,
       error: error instanceof Error ? error.message : String(error),
     })
-    await ctx.reply('Summary failed. Check the bot logs for the Fireworks or Telegram error.')
+    const message = 'Summary failed. Check the bot logs for the Fireworks or Telegram error.'
+    if (placeholderMessageId) {
+      await editSummaryMessage(ctx, placeholderMessageId, message)
+    } else {
+      await ctx.reply(message)
+    }
   } finally {
     runningSummaries.delete(ctx.chat.id)
   }
@@ -162,7 +197,7 @@ function messageContent(ctx: Context): { kind: string; text: string } | null {
   }
 
   const kind = mediaKind(message)
-  return kind === 'unknown' ? null : { kind, text: `[${kind}]` }
+  return kind === 'unknown' ? null : { kind, text: '[' + kind + ']' }
 }
 
 function mediaKind(message: NonNullable<Context['message']>) {
@@ -183,9 +218,19 @@ function formatDisplayName(user: NonNullable<Context['from']>) {
   return [user.first_name, user.last_name].filter(Boolean).join(' ') || user.username || String(user.id)
 }
 
-async function replyInChunks(ctx: Context, text: string) {
-  const maxLength = 3900
-  for (let offset = 0; offset < text.length; offset += maxLength) {
-    await ctx.reply(text.slice(offset, offset + maxLength))
+async function editSummaryMessage(ctx: Context, messageId: number, text: string) {
+  if (!ctx.chat) {
+    return
   }
+
+  await ctx.api
+    .editMessageText(ctx.chat.id, messageId, fitTelegramText(text))
+    .catch(() => undefined)
+}
+
+function fitTelegramText(text: string) {
+  if (text.length <= TELEGRAM_TEXT_LIMIT) {
+    return text
+  }
+  return text.slice(0, TELEGRAM_TEXT_LIMIT - 20).trimEnd() + '\n\n[truncated]'
 }
