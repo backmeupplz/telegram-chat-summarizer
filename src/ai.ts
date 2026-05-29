@@ -12,6 +12,7 @@ type ChatCompletionResponse = {
 export async function summarizeMessages(params: {
   chatTitle: string
   windowLabel: string
+  summaryRequest: string
   messages: StoredMessage[]
 }) {
   const response = await fetch(`${config.FIREWORKS_BASE_URL}/chat/completions`, {
@@ -29,7 +30,9 @@ export async function summarizeMessages(params: {
           role: 'system',
           content: [
             'You summarize Telegram group chats.',
-            'Write in the main language used by the chat messages.',
+            'By default, write in the main language used by the chat messages.',
+            'If the /summary request contains a plain-language language or style instruction, honor it naturally.',
+            'Do not require special command syntax for language selection.',
             'Be concise, concrete, and useful.',
             'Group related chatter into topics instead of listing messages one by one.',
             'Do not invent facts that are not in the messages.',
@@ -63,6 +66,7 @@ export async function summarizeMessages(params: {
 function buildSummaryPrompt(params: {
   chatTitle: string
   windowLabel: string
+  summaryRequest: string
   messages: StoredMessage[]
 }) {
   const lines = params.messages.map((message) => {
@@ -74,6 +78,8 @@ function buildSummaryPrompt(params: {
   return [
     `Chat: ${params.chatTitle}`,
     `Window: ${params.windowLabel}`,
+    `Summary request: ${params.summaryRequest || '(none)'}`,
+    'Language: use the language people are using in the chat unless the summary request plainly asks for another language.',
     '',
     'Return:',
     '- 3-7 bullets with the latest topics',

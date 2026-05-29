@@ -20,6 +20,14 @@ describe('resolveSummaryWindow', () => {
     })
   })
 
+  test('parses duration with a plain language instruction', () => {
+    expect(resolveSummaryWindow('24h in Ukrainian please', now, defaults)).toEqual({
+      label: 'last 24h',
+      limit: 500,
+      sinceUnixSeconds: now - 24 * 60 * 60,
+    })
+  })
+
   test('parses day duration', () => {
     expect(resolveSummaryWindow('7 days', now, defaults)).toEqual({
       label: 'last 7d',
@@ -32,6 +40,20 @@ describe('resolveSummaryWindow', () => {
     expect(resolveSummaryWindow('999 messages', now, defaults)).toEqual({
       label: 'latest 500 messages',
       limit: 500,
+    })
+  })
+
+  test('parses message count with a plain language instruction', () => {
+    expect(resolveSummaryWindow('100 in Spanish', now, defaults)).toEqual({
+      label: 'latest 100 messages',
+      limit: 100,
+    })
+  })
+
+  test('keeps plain language-only requests on the default window', () => {
+    expect(resolveSummaryWindow('write it in Japanese', now, defaults)).toEqual({
+      label: 'latest 200 messages',
+      limit: 200,
     })
   })
 })

@@ -13,7 +13,7 @@ const helpText = [
   '/summary 7d - summarize messages from the last 7 days',
   '/summary 100 - summarize the latest 100 messages',
   '',
-  'BotFather privacy mode must be disabled so I can see normal group messages.',
+  'I need permission to read normal group messages so I can build useful summaries.',
 ].join('\n')
 
 const runningSummaries = new Set<number>()
@@ -96,7 +96,8 @@ async function sendSummary(ctx: Context) {
 
   runningSummaries.add(ctx.chat.id)
   try {
-    const window = resolveSummaryWindow(String(ctx.match ?? ''), Math.floor(Date.now() / 1000), {
+    const summaryRequest = String(ctx.match ?? '').trim()
+    const window = resolveSummaryWindow(summaryRequest, Math.floor(Date.now() / 1000), {
       defaultMessages: config.SUMMARY_DEFAULT_MESSAGES,
       maxMessages: config.SUMMARY_MAX_MESSAGES,
     })
@@ -108,7 +109,7 @@ async function sendSummary(ctx: Context) {
 
     if (messages.length < 3) {
       await ctx.reply(
-        'I do not have enough stored group messages for a useful summary yet. Make sure BotFather privacy mode is disabled.'
+        'I do not have enough stored group messages for a useful summary yet. Make sure I can read normal group messages.'
       )
       return
     }
@@ -117,6 +118,7 @@ async function sendSummary(ctx: Context) {
     const summary = await summarizeMessages({
       chatTitle: chatTitle(ctx),
       windowLabel: window.label,
+      summaryRequest,
       messages,
     })
     await replyInChunks(ctx, summary)

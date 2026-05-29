@@ -4,7 +4,7 @@ export type SummaryWindow = {
   sinceUnixSeconds?: number
 }
 
-const durationPattern = /^(\d+)\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|week|weeks)$/i
+const durationPattern = /(?:^|\s)(\d+)\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|week|weeks)(?:\s|$)/i
 
 export function resolveSummaryWindow(
   input: string | undefined,
@@ -20,7 +20,25 @@ export function resolveSummaryWindow(
     }
   }
 
-  const countMatch = raw.match(/^(\d+)\s*(messages?|msgs?)?$/i)
+  const durationMatch = raw.match(durationPattern)
+  if (durationMatch) {
+    const amount = Number(durationMatch[1])
+    const unit = durationMatch[2].toLowerCase()
+    const secondsByUnit =
+      unit.startsWith('m') ? 60 :
+      unit.startsWith('h') ? 60 * 60 :
+      unit.startsWith('d') ? 24 * 60 * 60 :
+      7 * 24 * 60 * 60
+    const seconds = amount * secondsByUnit
+
+    return {
+      label: `last ${amount}${shortUnit(unit)}`,
+      limit: defaults.maxMessages,
+      sinceUnixSeconds: nowUnixSeconds - seconds,
+    }
+  }
+
+  const countMatch = raw.match(/^(\d+)\s*(messages?|msgs?)?(?:\s|$)/i)
   if (countMatch) {
     const requested = Number(countMatch[1])
     const limit = clampMessageLimit(requested, defaults.maxMessages)
@@ -30,27 +48,9 @@ export function resolveSummaryWindow(
     }
   }
 
-  const durationMatch = raw.match(durationPattern)
-  if (!durationMatch) {
-    return {
-      label: `latest ${defaults.defaultMessages} messages`,
-      limit: defaults.defaultMessages,
-    }
-  }
-
-  const amount = Number(durationMatch[1])
-  const unit = durationMatch[2].toLowerCase()
-  const secondsByUnit =
-    unit.startsWith('m') ? 60 :
-    unit.startsWith('h') ? 60 * 60 :
-    unit.startsWith('d') ? 24 * 60 * 60 :
-    7 * 24 * 60 * 60
-  const seconds = amount * secondsByUnit
-
   return {
-    label: `last ${amount}${shortUnit(unit)}`,
-    limit: defaults.maxMessages,
-    sinceUnixSeconds: nowUnixSeconds - seconds,
+    label: `latest ${defaults.defaultMessages} messages`,
+    limit: defaults.defaultMessages,
   }
 }
 

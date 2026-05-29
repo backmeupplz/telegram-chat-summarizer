@@ -11,12 +11,12 @@ Bot: [@chad_summary_bot](https://t.me/chad_summary_bot)
 - Uses Kimi K2.6 Turbo through Fireworks for concise summaries.
 - Keeps secrets in environment variables, not in git.
 
-Important Telegram limitation: bots can only store messages they receive after being added. To receive normal group messages, disable BotFather privacy mode for the bot.
+Important Telegram limitation: bots can only store messages they receive after being added. The bot needs permission to receive normal group messages.
 
 ## Telegram Setup
 
-1. Create or configure the bot in BotFather.
-2. Disable privacy mode: `/setprivacy` -> choose the bot -> `Disable`.
+1. Create or configure the Telegram bot.
+2. Allow it to receive normal group messages.
 3. Add the bot to a group.
 4. Send `/start` or `/help` in the group.
 5. After some chat happens, run `/summary` or `/summary 24h`.
