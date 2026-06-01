@@ -4,6 +4,7 @@ export type SummaryWindow = {
   sinceUnixSeconds?: number
 }
 
+const defaultHours = 24
 const durationPattern = /(?:^|\s)(\d+)\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|week|weeks)(?:\s|$)/i
 
 export function resolveSummaryWindow(
@@ -14,10 +15,7 @@ export function resolveSummaryWindow(
   const raw = input?.trim().toLowerCase()
 
   if (!raw) {
-    return {
-      label: `latest ${defaults.defaultMessages} messages`,
-      limit: defaults.defaultMessages,
-    }
+    return defaultDurationWindow(nowUnixSeconds, defaults.maxMessages)
   }
 
   const durationMatch = raw.match(durationPattern)
@@ -48,10 +46,7 @@ export function resolveSummaryWindow(
     }
   }
 
-  return {
-    label: `latest ${defaults.defaultMessages} messages`,
-    limit: defaults.defaultMessages,
-  }
+  return defaultDurationWindow(nowUnixSeconds, defaults.maxMessages)
 }
 
 function clampMessageLimit(requested: number, maxMessages: number) {
@@ -66,4 +61,12 @@ function shortUnit(unit: string) {
   if (unit.startsWith('h')) return 'h'
   if (unit.startsWith('d')) return 'd'
   return 'w'
+}
+
+function defaultDurationWindow(nowUnixSeconds: number, maxMessages: number): SummaryWindow {
+  return {
+    label: `last ${defaultHours}h`,
+    limit: maxMessages,
+    sinceUnixSeconds: nowUnixSeconds - defaultHours * 60 * 60,
+  }
 }

@@ -4,11 +4,17 @@ import { addMessage, ensureChat, recentMessages } from './db'
 import { streamSummaryMessages } from './ai'
 import { resolveSummaryWindow } from './summaryArgs'
 
+export const botCommands = [
+  { command: 'start', description: 'Show how the summarizer works' },
+  { command: 'help', description: 'Show usage examples' },
+  { command: 'summary', description: 'Summarize the last 24 hours by default' },
+]
+
 const helpText = [
   'I store group messages and summarize recent topics on demand.',
   '',
   'Commands:',
-  '/summary - summarize the latest messages',
+  '/summary - summarize messages from the last 24 hours',
   '/summary 24h - summarize messages from the last 24 hours',
   '/summary 7d - summarize messages from the last 7 days',
   '/summary 100 - summarize the latest 100 messages',
@@ -85,6 +91,10 @@ export function createBot() {
   })
 
   return bot
+}
+
+export async function setBotCommandMenu(bot: Pick<Bot, 'api'>) {
+  await bot.api.setMyCommands(botCommands)
 }
 
 async function sendSummary(ctx: Context) {

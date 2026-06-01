@@ -1,8 +1,9 @@
 import { closeDb } from './db'
-import { createBot } from './bot'
+import { createBot, setBotCommandMenu } from './bot'
 
 const bot = createBot()
 const me = await bot.api.getMe()
+await setBotCommandMenu(bot)
 
 console.log(`Starting Telegram chat summarizer bot as @${me.username ?? me.id}`)
 

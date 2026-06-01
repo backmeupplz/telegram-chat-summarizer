@@ -5,10 +5,11 @@ const defaults = { defaultMessages: 200, maxMessages: 500 }
 const now = 1_700_000_000
 
 describe('resolveSummaryWindow', () => {
-  test('defaults to latest messages', () => {
+  test('defaults to the last 24 hours', () => {
     expect(resolveSummaryWindow('', now, defaults)).toEqual({
-      label: 'latest 200 messages',
-      limit: 200,
+      label: 'last 24h',
+      limit: 500,
+      sinceUnixSeconds: now - 24 * 60 * 60,
     })
   })
 
@@ -50,10 +51,11 @@ describe('resolveSummaryWindow', () => {
     })
   })
 
-  test('keeps plain language-only requests on the default window', () => {
+  test('keeps plain language-only requests on the 24 hour default window', () => {
     expect(resolveSummaryWindow('write it in Japanese', now, defaults)).toEqual({
-      label: 'latest 200 messages',
-      limit: 200,
+      label: 'last 24h',
+      limit: 500,
+      sinceUnixSeconds: now - 24 * 60 * 60,
     })
   })
 })
