@@ -18,6 +18,9 @@ const schema = z.object({
   SUMMARY_MAX_MESSAGES: z.coerce.number().int().positive().default(500),
   AI_TEMPERATURE: z.coerce.number().min(0).max(2).default(0.35),
   AI_MAX_TOKENS: z.coerce.number().int().positive().default(1800),
+  AI_REASONING_EFFORT: z
+    .enum(['none', 'low', 'medium', 'high', 'max'])
+    .default('none'),
 })
 
 const parsed = schema.safeParse(process.env)

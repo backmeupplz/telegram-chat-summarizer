@@ -41,6 +41,7 @@ export async function* streamSummaryMessages(params: {
       model: config.FIREWORKS_MODEL,
       temperature: config.AI_TEMPERATURE,
       max_tokens: config.AI_MAX_TOKENS,
+      reasoning_effort: config.AI_REASONING_EFFORT,
       stream: true,
       messages: [
         {

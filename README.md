@@ -35,6 +35,7 @@ Copy `.env.example` to `.env` locally, or set these variables in Easypanel:
 - `SUMMARY_MAX_MESSAGES`
 - `AI_TEMPERATURE`
 - `AI_MAX_TOKENS`
+- `AI_REASONING_EFFORT` (defaults to `none` so Kimi returns visible summary text instead of spending the budget on hidden reasoning)
 
 Use a persistent volume for `DATABASE_PATH`, for example `/app/data/chat-summaries.sqlite`.
 
