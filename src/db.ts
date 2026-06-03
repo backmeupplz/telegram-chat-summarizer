@@ -51,6 +51,22 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS messages_chat_id_id_idx ON messages(chat_id, id);
 `)
 
+migrateSchema()
+
+function migrateSchema() {
+  addColumnIfMissing('chats', 'username', 'username TEXT')
+}
+
+function addColumnIfMissing(tableName: string, columnName: string, definition: string) {
+  const columns = db
+    .query(`PRAGMA table_info(${tableName})`)
+    .all() as Array<{ name: string }>
+
+  if (!columns.some((column) => column.name === columnName)) {
+    db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${definition}`)
+  }
+}
+
 export function ensureChat(chatId: number, title: string, type: string, username?: string | null) {
   db.query(
     `INSERT INTO chats (chat_id, title, type, username)
