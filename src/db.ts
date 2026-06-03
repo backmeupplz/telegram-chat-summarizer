@@ -11,6 +11,13 @@ export type StoredMessage = {
   messageDate: number
 }
 
+export type ChatInfo = {
+  chatId: number
+  title: string
+  type: string
+  username: string | null
+}
+
 const db = new Database(config.DATABASE_PATH)
 db.exec('PRAGMA journal_mode = WAL')
 db.exec('PRAGMA foreign_keys = ON')
@@ -20,6 +27,7 @@ db.exec(`
     chat_id INTEGER PRIMARY KEY,
     title TEXT NOT NULL,
     type TEXT NOT NULL,
+    username TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
@@ -43,15 +51,16 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS messages_chat_id_id_idx ON messages(chat_id, id);
 `)
 
-export function ensureChat(chatId: number, title: string, type: string) {
+export function ensureChat(chatId: number, title: string, type: string, username?: string | null) {
   db.query(
-    `INSERT INTO chats (chat_id, title, type)
-     VALUES (?, ?, ?)
+    `INSERT INTO chats (chat_id, title, type, username)
+     VALUES (?, ?, ?, ?)
      ON CONFLICT(chat_id) DO UPDATE SET
        title = excluded.title,
        type = excluded.type,
+       username = COALESCE(excluded.username, chats.username),
        updated_at = CURRENT_TIMESTAMP`
-  ).run(chatId, title || String(chatId), type)
+  ).run(chatId, title || String(chatId), type, username ?? null)
 }
 
 export function addMessage(params: {
@@ -78,6 +87,15 @@ export function addMessage(params: {
     params.text,
     params.messageDate
   )
+}
+
+export function getChatInfo(chatId: number): ChatInfo | null {
+  const row = db
+    .query(
+      `SELECT chat_id AS chatId, title, type, username FROM chats WHERE chat_id = ?`
+    )
+    .get(chatId) as ChatInfo | null
+  return row
 }
 
 export function recentMessages(params: {

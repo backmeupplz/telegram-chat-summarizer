@@ -1,8 +1,10 @@
 import { Bot, type Context } from 'grammy'
 import { config } from './config'
-import { addMessage, ensureChat, recentMessages } from './db'
+import { addMessage, ensureChat, getChatInfo, recentMessages } from './db'
 import { streamSummaryMessages } from './ai'
 import { resolveSummaryWindow } from './summaryArgs'
+import { sanitizeTelegramHtml, fitTelegramHtml } from './htmlSafe'
+import { buildMessageLink, type ChatMetadata } from './links'
 
 export const botCommands = [
   { command: 'start', description: 'Show how the summarizer works' },
@@ -26,6 +28,7 @@ const runningSummaries = new Set<number>()
 const SUMMARY_EDIT_INTERVAL_MS = 1200
 const SUMMARY_MIN_FIRST_EDIT_CHARS = 40
 const TELEGRAM_TEXT_LIMIT = 3900
+const TELEGRAM_HTML_LIMIT = 4096
 
 export function createBot() {
   const bot = new Bot(config.TELEGRAM_BOT_TOKEN)
@@ -129,13 +132,15 @@ async function sendSummary(ctx: Context) {
     }).filter((message) => !message.text.startsWith('/summary'))
 
     if (messages.length < 1) {
-      await editSummaryMessage(
+      await editSummaryMessagePlain(
         ctx,
         placeholder.message_id,
         'I do not have any stored group messages to summarize yet. Make sure I can read normal group messages.'
       )
       return
     }
+
+    const chatMeta = chatMetadata(ctx)
 
     let accumulated = ''
     let lastEditAt = 0
@@ -144,6 +149,7 @@ async function sendSummary(ctx: Context) {
       windowLabel: window.label,
       summaryRequest,
       messages,
+      chatMetadata: chatMeta,
     })) {
       accumulated += delta
       if (accumulated.length < SUMMARY_MIN_FIRST_EDIT_CHARS) {
@@ -153,15 +159,12 @@ async function sendSummary(ctx: Context) {
       const now = Date.now()
       if (now - lastEditAt >= SUMMARY_EDIT_INTERVAL_MS) {
         lastEditAt = now
-        await editSummaryMessage(ctx, placeholder.message_id, accumulated + ' ...')
+        await editSummaryMessagePlain(ctx, placeholder.message_id, accumulated + ' ...')
       }
     }
 
-    await editSummaryMessage(
-      ctx,
-      placeholder.message_id,
-      accumulated.trim() || 'Kimi returned an empty summary.'
-    )
+    const finalText = accumulated.trim() || 'Kimi returned an empty summary.'
+    await sendFinalSummary(ctx, placeholder.message_id, finalText)
   } catch (error) {
     console.error('summary failed', {
       chatId: ctx.chat.id,
@@ -169,7 +172,7 @@ async function sendSummary(ctx: Context) {
     })
     const message = 'Summary failed. Check the bot logs for the Fireworks or Telegram error.'
     if (placeholderMessageId) {
-      await editSummaryMessage(ctx, placeholderMessageId, message)
+      await editSummaryMessagePlain(ctx, placeholderMessageId, message)
     } else {
       await ctx.reply(message)
     }
@@ -182,7 +185,18 @@ function registerChat(ctx: Context) {
   if (!ctx.chat) {
     return
   }
-  ensureChat(ctx.chat.id, chatTitle(ctx), ctx.chat.type)
+  const username = 'username' in ctx.chat && ctx.chat.username ? ctx.chat.username : null
+  ensureChat(ctx.chat.id, chatTitle(ctx), ctx.chat.type, username)
+}
+
+function chatMetadata(ctx: Context): ChatMetadata {
+  const chat = ctx.chat!
+  const username = 'username' in chat && chat.username ? chat.username : null
+  return {
+    chatId: chat.id,
+    type: chat.type,
+    username: username,
+  }
 }
 
 function isGroup(ctx: Context) {
@@ -228,7 +242,30 @@ function formatDisplayName(user: NonNullable<Context['from']>) {
   return [user.first_name, user.last_name].filter(Boolean).join(' ') || user.username || String(user.id)
 }
 
-async function editSummaryMessage(ctx: Context, messageId: number, text: string) {
+async function sendFinalSummary(ctx: Context, messageId: number, text: string) {
+  if (!ctx.chat) {
+    return
+  }
+
+  const safeHtml = sanitizeTelegramHtml(text)
+  const fitted = fitTelegramHtml(safeHtml, TELEGRAM_HTML_LIMIT)
+
+  try {
+    await ctx.api.editMessageText(ctx.chat.id, messageId, fitted, {
+      parse_mode: 'HTML',
+    })
+  } catch (htmlError) {
+    console.error('HTML edit failed, falling back to plain text', {
+      chatId: ctx.chat.id,
+      error: htmlError instanceof Error ? htmlError.message : String(htmlError),
+    })
+    const plain = toPlainTelegramText(text)
+    const plainFitted = fitTelegramText(plain, TELEGRAM_TEXT_LIMIT)
+    await ctx.api.editMessageText(ctx.chat.id, messageId, plainFitted).catch(() => undefined)
+  }
+}
+
+async function editSummaryMessagePlain(ctx: Context, messageId: number, text: string) {
   if (!ctx.chat) {
     return
   }
@@ -238,18 +275,19 @@ async function editSummaryMessage(ctx: Context, messageId: number, text: string)
     .catch(() => undefined)
 }
 
-function fitTelegramText(text: string) {
-  if (text.length <= TELEGRAM_TEXT_LIMIT) {
+function fitTelegramText(text: string, limit = TELEGRAM_TEXT_LIMIT) {
+  if (text.length <= limit) {
     return text
   }
-  return text.slice(0, TELEGRAM_TEXT_LIMIT - 20).trimEnd() + '\n\n[truncated]'
+  return text.slice(0, limit - 20).trimEnd() + '\n\n[truncated]'
 }
 
 function toPlainTelegramText(text: string) {
   return text
+    .replace(/<[^>]*>/g, '')
     .replace(/```[a-zA-Z]*\n?/g, '')
     .replace(/```/g, '')
-    .replace(/\[([^\]]+)]\(([^)]+)\)/g, '$1: $2')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1: $2')
     .replace(/`([^`]+)`/g, '$1')
     .replace(/\*\*([^*]+)\*\*/g, '$1')
     .replace(/__([^_]+)__/g, '$1')

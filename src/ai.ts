@@ -1,5 +1,7 @@
 import { config } from './config'
 import type { StoredMessage } from './db'
+import type { ChatMetadata } from './links'
+import { buildMessageLink } from './links'
 
 type ChatCompletionResponse = {
   choices?: Array<{
@@ -17,6 +19,7 @@ export async function summarizeMessages(params: {
   windowLabel: string
   summaryRequest: string
   messages: StoredMessage[]
+  chatMetadata: ChatMetadata
 }) {
   let result = ''
   for await (const delta of streamSummaryMessages(params)) {
@@ -30,6 +33,7 @@ export async function* streamSummaryMessages(params: {
   windowLabel: string
   summaryRequest: string
   messages: StoredMessage[]
+  chatMetadata: ChatMetadata
 }) {
   const response = await fetch(config.FIREWORKS_BASE_URL + '/chat/completions', {
     method: 'POST',
@@ -51,11 +55,15 @@ export async function* streamSummaryMessages(params: {
             'By default, write in the main language used by the chat messages.',
             'If the /summary request contains a plain-language language or style instruction, honor it naturally.',
             'Do not require special command syntax for language selection.',
-            'Return plain text only. Do not use Markdown, HTML, headings, bold, italics, code blocks, tables, or links with Markdown syntax.',
+            'Return Telegram-safe HTML only.',
+            'Allowed tags: <b>, <i>, <u>, <s>, <code>, <pre>, <a href="...">.',
+            'Do not use Markdown, headings, tables, images, or unsupported HTML tags.',
             'Be concise, concrete, and useful.',
             'Group related chatter into topics instead of listing messages one by one.',
             'Do not invent facts that are not in the messages.',
             'Avoid quoting private message text unless it is necessary for clarity.',
+            'When referencing a specific message, you may include a compact source link using the provided message URLs.',
+            'Only include links for the most relevant messages; do not link every message.',
           ].join(' '),
         },
         {
@@ -85,11 +93,14 @@ function buildSummaryPrompt(params: {
   windowLabel: string
   summaryRequest: string
   messages: StoredMessage[]
+  chatMetadata: ChatMetadata
 }) {
   const lines = params.messages.map((message) => {
     const timestamp = new Date(message.messageDate * 1000).toISOString()
     const body = message.text.replace(/\s+/g, ' ').trim()
-    return '[' + timestamp + '] ' + message.displayName + ': ' + body
+    const link = buildMessageLink(params.chatMetadata, message.telegramMessageId)
+    const linkPart = link ? ` [url:${link}]` : ''
+    return '[' + timestamp + '] ' + message.displayName + ': ' + body + linkPart
   })
 
   return [
@@ -98,11 +109,13 @@ function buildSummaryPrompt(params: {
     'Summary request: ' + (params.summaryRequest || '(none)'),
     'Language: use the language people are using in the chat unless the summary request plainly asks for another language.',
     '',
-    'Return plain text only:',
+    'Return Telegram-safe HTML only.',
+    'Allowed tags: <b>, <i>, <u>, <s>, <code>, <pre>, <a href="...">.',
     'Use 3-7 short lines covering the latest topics.',
     'Include decisions or plans when present.',
     'Include open questions or follow-ups only when present.',
-    'Do not use Markdown or HTML formatting.',
+    'When referencing a specific message, include a compact link like <a href="URL">ref</a> using only the URLs provided in the prompt.',
+    'Do not invent links.',
     '',
     'Messages:',
     lines.join('\n'),
