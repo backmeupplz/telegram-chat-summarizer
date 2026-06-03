@@ -22,6 +22,11 @@ describe('sanitizeTelegramHtml', () => {
     expect(sanitizeTelegramHtml(input)).toBe('hello alert(1)')
   })
 
+  test('strips tags that Telegram HTML does not support', () => {
+    const input = '<p>Topic</p><ul><li>one</li></ul><br>done'
+    expect(sanitizeTelegramHtml(input)).toBe('Topiconedone')
+  })
+
   test('strips a with unsafe href but keeps text', () => {
     const input = '<a href="https://evil.com">bad</a> safe'
     expect(sanitizeTelegramHtml(input)).toBe('bad safe')
@@ -63,8 +68,13 @@ describe('sanitizeTelegramHtml', () => {
   })
 
   test('strips unsupported a attributes', () => {
-    const input = '<a href="https://t.me/g/1" target="_blank">link</a>'
-    expect(sanitizeTelegramHtml(input)).toBe('<a href="https://t.me/g/1">link</a>')
+    const input = '<a href="https://t.me/mygroup/1" target="_blank">link</a>'
+    expect(sanitizeTelegramHtml(input)).toBe('<a href="https://t.me/mygroup/1">link</a>')
+  })
+
+  test('strips malformed t.me message links', () => {
+    const input = '<a href="https://t.me/+invite/1">bad</a> <a href="https://t.me/c/123/4">ok</a>'
+    expect(sanitizeTelegramHtml(input)).toBe('bad <a href="https://t.me/c/123/4">ok</a>')
   })
 
   test('handles empty input', () => {
@@ -77,8 +87,8 @@ describe('sanitizeTelegramHtml', () => {
   })
 
   test('handles model-generated broken html', () => {
-    const input = '<b>Topic 1</b> <a href="https://t.me/g/1">link</a> <i>text</i> <div>extra</div>'
-    expect(sanitizeTelegramHtml(input)).toBe('<b>Topic 1</b> <a href="https://t.me/g/1">link</a> <i>text</i> extra')
+    const input = '<b>Topic 1</b> <a href="https://t.me/mygroup/1">link</a> <i>text</i> <div>extra</div>'
+    expect(sanitizeTelegramHtml(input)).toBe('<b>Topic 1</b> <a href="https://t.me/mygroup/1">link</a> <i>text</i> extra')
   })
 })
 
@@ -90,6 +100,15 @@ describe('fitTelegramHtml', () => {
   test('truncates long text', () => {
     const long = 'a'.repeat(5000)
     const result = fitTelegramHtml(long)
+    expect(result.endsWith('\n\n[truncated]')).toBe(true)
+    expect(result.length).toBeLessThanOrEqual(4096)
+  })
+
+  test('does not slice through html tags while truncating', () => {
+    const long = '<b>' + 'a'.repeat(5000) + '</b>'
+    const result = fitTelegramHtml(long)
+    expect(result).not.toContain('<b>')
+    expect(result).not.toContain('</b>')
     expect(result.endsWith('\n\n[truncated]')).toBe(true)
     expect(result.length).toBeLessThanOrEqual(4096)
   })

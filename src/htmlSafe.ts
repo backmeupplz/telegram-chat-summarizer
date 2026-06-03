@@ -1,24 +1,17 @@
 const ALLOWED_TAGS = new Set([
   'b',
+  'strong',
   'i',
+  'em',
   'u',
+  'ins',
   's',
+  'strike',
+  'del',
   'code',
   'pre',
   'a',
-  'br',
-  'p',
-  'ul',
-  'ol',
-  'li',
-  'strong',
-  'em',
-  'strike',
-  'del',
-  'ins',
 ])
-
-const VOID_TAGS = new Set(['br', 'hr', 'img', 'input', 'meta', 'link', 'area', 'base', 'col', 'embed', 'param', 'source', 'track', 'wbr'])
 
 const TELEGRAM_TEXT_LIMIT = 4096
 
@@ -79,12 +72,8 @@ export function sanitizeTelegramHtml(input: string): string {
       continue
     }
 
-    if (VOID_TAGS.has(tagName)) {
-      result.push(`<${tagName} />`)
-    } else {
-      result.push(`<${tagName}>`)
-      tagStack.push(tagName)
-    }
+    result.push(`<${tagName}>`)
+    tagStack.push(tagName)
     i = gt + 1
   }
 
@@ -100,7 +89,9 @@ export function fitTelegramHtml(text: string, limit = TELEGRAM_TEXT_LIMIT): stri
   if (text.length <= limit) {
     return text
   }
-  return text.slice(0, limit - 20).trimEnd() + '\n\n[truncated]'
+  const suffix = '\n\n[truncated]'
+  const plain = htmlToPlainText(text).slice(0, limit - suffix.length).trimEnd() + suffix
+  return escapeHtmlEntities(plain)
 }
 
 function parseTag(raw: string): { name: string; closing: boolean; attrs: Map<string, string> } | null {
@@ -133,7 +124,7 @@ function parseTag(raw: string): { name: string; closing: boolean; attrs: Map<str
 }
 
 function isSafeHref(href: string): boolean {
-  return href.startsWith('https://t.me/') && !href.includes('\n') && !href.includes('\r')
+  return /^https:\/\/t\.me\/(?:c\/\d+|[A-Za-z0-9_]{5,32})\/\d+$/.test(href)
 }
 
 function escapeHtmlEntities(text: string): string {
@@ -147,4 +138,14 @@ function escapeHtmlAttribute(value: string): string {
   return value
     .replace(/&/g, '&amp;')
     .replace(/"/g, '&quot;')
+}
+
+function htmlToPlainText(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, '')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
 }
