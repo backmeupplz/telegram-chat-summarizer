@@ -45,7 +45,11 @@ export async function* streamSummaryMessages(params: {
       model: config.FIREWORKS_MODEL,
       temperature: config.AI_TEMPERATURE,
       max_tokens: config.AI_MAX_TOKENS,
-      reasoning_effort: config.AI_REASONING_EFFORT,
+      // MiMo (and similar models) reason by default; disable it so the token
+      // budget goes to the visible summary instead of hidden chain-of-thought.
+      ...(config.DISABLE_REASONING
+        ? { chat_template_kwargs: { enable_thinking: false } }
+        : {}),
       stream: true,
       messages: [
         {
