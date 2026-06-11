@@ -9,6 +9,7 @@ export type StoredMessage = {
   kind: string
   text: string
   messageDate: number
+  threadId: number | null
 }
 
 export type ChatInfo = {
@@ -42,6 +43,7 @@ db.exec(`
     kind TEXT NOT NULL,
     text TEXT NOT NULL,
     message_date INTEGER NOT NULL,
+    thread_id INTEGER,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (chat_id, telegram_message_id),
     FOREIGN KEY (chat_id) REFERENCES chats(chat_id) ON DELETE CASCADE
@@ -55,6 +57,7 @@ migrateSchema()
 
 function migrateSchema() {
   addColumnIfMissing('chats', 'username', 'username TEXT')
+  addColumnIfMissing('messages', 'thread_id', 'thread_id INTEGER')
 }
 
 function addColumnIfMissing(tableName: string, columnName: string, definition: string) {
@@ -88,11 +91,12 @@ export function addMessage(params: {
   kind: string
   text: string
   messageDate: number
+  threadId?: number | null
 }) {
   db.query(
     `INSERT OR IGNORE INTO messages
-       (chat_id, telegram_message_id, user_id, username, display_name, kind, text, message_date)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+       (chat_id, telegram_message_id, user_id, username, display_name, kind, text, message_date, thread_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     params.chatId,
     params.telegramMessageId,
@@ -101,7 +105,8 @@ export function addMessage(params: {
     params.displayName,
     params.kind,
     params.text,
-    params.messageDate
+    params.messageDate,
+    params.threadId ?? null
   )
 }
 
@@ -127,7 +132,8 @@ export function recentMessages(params: {
               display_name AS displayName,
               kind,
               text,
-              message_date AS messageDate
+              message_date AS messageDate,
+              thread_id AS threadId
        FROM messages
        WHERE chat_id = ?
          AND (? IS NULL OR message_date >= ?)

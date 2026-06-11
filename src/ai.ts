@@ -102,7 +102,11 @@ function buildSummaryPrompt(params: {
   const lines = params.messages.map((message) => {
     const timestamp = new Date(message.messageDate * 1000).toISOString()
     const body = message.text.replace(/\s+/g, ' ').trim()
-    const link = buildMessageLink(params.chatMetadata, message.telegramMessageId)
+    const link = buildMessageLink(
+      params.chatMetadata,
+      message.telegramMessageId,
+      message.threadId
+    )
     const linkPart = link ? ` [url:${link}]` : ''
     return '[' + timestamp + '] ' + message.displayName + ': ' + body + linkPart
   })

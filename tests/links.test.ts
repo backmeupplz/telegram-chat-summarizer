@@ -41,6 +41,42 @@ describe('buildMessageLink', () => {
     )
     expect(link).toBeNull()
   })
+
+  test('forum topic message in private supergroup includes thread id', () => {
+    const link = buildMessageLink(
+      { chatId: -1001234567890, type: 'supergroup', username: null },
+      42,
+      7
+    )
+    expect(link).toBe('https://t.me/c/1234567890/7/42')
+  })
+
+  test('forum topic message in public supergroup includes thread id', () => {
+    const link = buildMessageLink(
+      { chatId: -1001234567890, type: 'supergroup', username: 'mygroup' },
+      42,
+      7
+    )
+    expect(link).toBe('https://t.me/mygroup/7/42')
+  })
+
+  test('topic root message (msg id equals thread id) stays two-segment', () => {
+    const link = buildMessageLink(
+      { chatId: -1001234567890, type: 'supergroup', username: null },
+      7,
+      7
+    )
+    expect(link).toBe('https://t.me/c/1234567890/7')
+  })
+
+  test('null thread id keeps two-segment link', () => {
+    const link = buildMessageLink(
+      { chatId: -1001234567890, type: 'supergroup', username: null },
+      42,
+      null
+    )
+    expect(link).toBe('https://t.me/c/1234567890/42')
+  })
 })
 
 describe('internalChatId', () => {

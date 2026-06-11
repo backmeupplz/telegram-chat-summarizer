@@ -90,6 +90,7 @@ export function createBot() {
       kind: content.kind,
       text: content.text,
       messageDate: ctx.message.date,
+      threadId: topicThreadId(ctx),
     })
   })
 
@@ -105,8 +106,12 @@ async function sendSummary(ctx: Context) {
     return
   }
 
+  const threadId = topicThreadId(ctx)
+
   if (runningSummaries.has(ctx.chat.id)) {
-    await ctx.reply('A summary is already running for this group.')
+    await ctx.reply('A summary is already running for this group.', {
+      message_thread_id: threadId,
+    })
     return
   }
 
@@ -114,6 +119,7 @@ async function sendSummary(ctx: Context) {
   let placeholderMessageId: number | null = null
   try {
     const placeholder = await ctx.reply('Summarizing...', {
+      message_thread_id: threadId,
       reply_parameters: ctx.message
         ? { message_id: ctx.message.message_id }
         : undefined,
@@ -174,7 +180,7 @@ async function sendSummary(ctx: Context) {
     if (placeholderMessageId) {
       await editSummaryMessagePlain(ctx, placeholderMessageId, message)
     } else {
-      await ctx.reply(message)
+      await ctx.reply(message, { message_thread_id: threadId })
     }
   } finally {
     runningSummaries.delete(ctx.chat.id)
@@ -201,6 +207,17 @@ function chatMetadata(ctx: Context): ChatMetadata {
 
 function isGroup(ctx: Context) {
   return ctx.chat?.type === 'group' || ctx.chat?.type === 'supergroup'
+}
+
+// In forum (topic) groups, replies must carry the topic thread id or they land
+// in the General topic. Only set it for real topic messages, not plain reply
+// threads (where message_thread_id is reused but is_topic_message is unset).
+function topicThreadId(ctx: Context): number | undefined {
+  const message = ctx.message
+  if (message && message.is_topic_message && message.message_thread_id) {
+    return message.message_thread_id
+  }
+  return undefined
 }
 
 function chatTitle(ctx: Context) {

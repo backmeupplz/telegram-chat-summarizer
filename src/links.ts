@@ -4,19 +4,30 @@ export type ChatMetadata = {
   username: string | null
 }
 
-export function buildMessageLink(meta: ChatMetadata, telegramMessageId: number): string | null {
+export function buildMessageLink(
+  meta: ChatMetadata,
+  telegramMessageId: number,
+  threadId?: number | null
+): string | null {
   if (meta.type !== 'group' && meta.type !== 'supergroup' && meta.type !== 'channel') {
     return null
   }
 
+  // Forum topic messages need the topic thread id as a path segment, otherwise
+  // Telegram cannot resolve the message and the link looks broken.
+  const messagePath =
+    threadId && threadId !== telegramMessageId
+      ? `${threadId}/${telegramMessageId}`
+      : `${telegramMessageId}`
+
   if (meta.username) {
-    return `https://t.me/${meta.username}/${telegramMessageId}`
+    return `https://t.me/${meta.username}/${messagePath}`
   }
 
   if (meta.type === 'channel' || meta.type === 'supergroup') {
     const internalId = internalChatId(meta.chatId)
     if (internalId !== null) {
-      return `https://t.me/c/${internalId}/${telegramMessageId}`
+      return `https://t.me/c/${internalId}/${messagePath}`
     }
   }
 
