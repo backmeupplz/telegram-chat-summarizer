@@ -8,7 +8,7 @@ Bot: [@chad_summary_bot](https://t.me/chad_summary_bot)
 
 - Stores incoming text, captions, and basic media placeholders separately per Telegram group.
 - Lets any group member run `/summary` for the last 24 hours, or pass a window like `/summary 7d` or `/summary 100`.
-- Uses Kimi K2.6 Turbo through Fireworks for concise summaries.
+- Uses the configured LLM endpoint for concise summaries.
 - Streams summaries by editing a plain-text placeholder message.
 - Keeps secrets in environment variables, not in git.
 
@@ -27,9 +27,9 @@ Important Telegram limitation: bots can only store messages they receive after b
 Copy `.env.example` to `.env` locally, or set these variables in Easypanel:
 
 - `TELEGRAM_BOT_TOKEN`
-- `FIREWORKS_API_KEY`
-- `FIREWORKS_BASE_URL`
-- `FIREWORKS_MODEL`
+- `LLM_API_KEY`
+- `LLM_BASE_URL`
+- `LLM_MODEL`
 - `DATABASE_PATH`
 - `SUMMARY_DEFAULT_MESSAGES`
 - `SUMMARY_MAX_MESSAGES`

@@ -35,14 +35,14 @@ export async function* streamSummaryMessages(params: {
   messages: StoredMessage[]
   chatMetadata: ChatMetadata
 }) {
-  const response = await fetch(config.FIREWORKS_BASE_URL + '/chat/completions', {
+  const response = await fetch(config.LLM_BASE_URL + '/chat/completions', {
     method: 'POST',
     headers: {
-      Authorization: 'Bearer ' + config.FIREWORKS_API_KEY,
+      Authorization: 'Bearer ' + config.LLM_API_KEY,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: config.FIREWORKS_MODEL,
+      model: config.LLM_MODEL,
       temperature: config.AI_TEMPERATURE,
       max_tokens: config.AI_MAX_TOKENS,
       // MiMo (and similar models) reason by default; disable it so the token
@@ -82,12 +82,12 @@ export async function* streamSummaryMessages(params: {
   if (!response.ok) {
     const body = await response.text()
     throw new Error(
-      'Fireworks request failed: ' + response.status + ' ' + body.slice(0, 300)
+      'LLM request failed: ' + response.status + ' ' + body.slice(0, 300)
     )
   }
 
   if (!response.body) {
-    throw new Error('Fireworks response did not contain a stream body')
+    throw new Error('LLM response did not contain a stream body')
   }
 
   yield* parseChatCompletionStream(response.body)

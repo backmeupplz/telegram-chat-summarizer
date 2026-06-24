@@ -40,7 +40,9 @@ describe('database migrations', () => {
       const moduleUrl = pathToFileURL(join(process.cwd(), 'src/db.ts')).href
       const script = `
         process.env.TELEGRAM_BOT_TOKEN = 'test-token'
-        process.env.FIREWORKS_API_KEY = 'test-key'
+        process.env.LLM_API_KEY = 'test-key'
+        process.env.LLM_BASE_URL = 'https://token-plan-sgp.xiaomimimo.com/v1'
+        process.env.LLM_MODEL = 'mimo-v2.5'
         process.env.DATABASE_PATH = ${JSON.stringify(dbPath)}
         const dbModule = await import(${JSON.stringify(moduleUrl)})
         dbModule.ensureChat(-1001234567890, 'Test Chat', 'supergroup', 'testchat')

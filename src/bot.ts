@@ -176,7 +176,7 @@ async function sendSummary(ctx: Context) {
       chatId: ctx.chat.id,
       error: error instanceof Error ? error.message : String(error),
     })
-    const message = 'Summary failed. Check the bot logs for the Fireworks or Telegram error.'
+    const message = 'Summary failed. Check the bot logs for the LLM or Telegram error.'
     if (placeholderMessageId) {
       await editSummaryMessagePlain(ctx, placeholderMessageId, message)
     } else {
