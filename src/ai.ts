@@ -14,6 +14,18 @@ type ChatCompletionResponse = {
   }>
 }
 
+function disableReasoningOptions() {
+  if (!config.DISABLE_REASONING) {
+    return {}
+  }
+
+  if (config.LLM_BASE_URL.includes('openrouter.ai')) {
+    return { reasoning: { enabled: false } }
+  }
+
+  return { chat_template_kwargs: { enable_thinking: false } }
+}
+
 export async function summarizeMessages(params: {
   chatTitle: string
   windowLabel: string
@@ -47,9 +59,7 @@ export async function* streamSummaryMessages(params: {
       max_tokens: config.AI_MAX_TOKENS,
       // MiMo (and similar models) reason by default; disable it so the token
       // budget goes to the visible summary instead of hidden chain-of-thought.
-      ...(config.DISABLE_REASONING
-        ? { chat_template_kwargs: { enable_thinking: false } }
-        : {}),
+      ...disableReasoningOptions(),
       stream: true,
       messages: [
         {
