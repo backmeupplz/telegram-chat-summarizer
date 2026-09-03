@@ -169,8 +169,7 @@ async function sendSummary(ctx: Context) {
       }
     }
 
-    const finalText = accumulated.trim() || 'Kimi returned an empty summary.'
-    await sendFinalSummary(ctx, placeholder.message_id, finalText)
+    await sendFinalSummary(ctx, placeholder.message_id, accumulated.trim())
   } catch (error) {
     console.error('summary failed', {
       chatId: ctx.chat.id,

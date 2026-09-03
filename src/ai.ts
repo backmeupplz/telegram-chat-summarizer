@@ -14,13 +14,16 @@ type ChatCompletionResponse = {
   }>
 }
 
-function disableReasoningOptions() {
-  if (!config.DISABLE_REASONING) {
+export function reasoningOptions(
+  baseUrl: string = config.LLM_BASE_URL,
+  disableReasoning: boolean = config.DISABLE_REASONING
+) {
+  if (!disableReasoning) {
     return {}
   }
 
-  if (config.LLM_BASE_URL.includes('openrouter.ai')) {
-    return { reasoning: { enabled: false } }
+  if (baseUrl.includes('openrouter.ai')) {
+    return { reasoning: { effort: 'low', exclude: true } }
   }
 
   return { chat_template_kwargs: { enable_thinking: false } }
@@ -47,60 +50,72 @@ export async function* streamSummaryMessages(params: {
   messages: StoredMessage[]
   chatMetadata: ChatMetadata
 }) {
-  const response = await fetch(config.LLM_BASE_URL + '/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: 'Bearer ' + config.LLM_API_KEY,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: config.LLM_MODEL,
-      temperature: config.AI_TEMPERATURE,
-      max_tokens: config.AI_MAX_TOKENS,
-      // MiMo (and similar models) reason by default; disable it so the token
-      // budget goes to the visible summary instead of hidden chain-of-thought.
-      ...disableReasoningOptions(),
-      stream: true,
-      messages: [
-        {
-          role: 'system',
-          content: [
-            'You summarize Telegram group chats.',
-            'Before writing, check which human language is most prevalent in the provided message history and use that language for the summary.',
-            'Do not assume Russian or any other language from names, chat titles, Telegram UI, or prior context.',
-            'If the /summary request contains a plain-language language or style instruction, honor it naturally.',
-            'Do not require special command syntax for language selection.',
-            'Return Telegram-safe HTML only.',
-            'Allowed tags: <b>, <i>, <u>, <s>, <code>, <pre>, <a href="...">.',
-            'Do not use Markdown, headings, tables, images, or unsupported HTML tags.',
-            'Be concise, concrete, and useful.',
-            'Group related chatter into topics instead of listing messages one by one.',
-            'Do not invent facts that are not in the messages.',
-            'Avoid quoting private message text unless it is necessary for clarity.',
-            'When referencing a specific message, you may include a compact source link using the provided message URLs.',
-            'Only include links for the most relevant messages; do not link every message.',
-          ].join(' '),
-        },
-        {
-          role: 'user',
-          content: buildSummaryPrompt(params),
-        },
-      ],
-    }),
-  })
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const response = await fetch(config.LLM_BASE_URL + '/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + config.LLM_API_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: config.LLM_MODEL,
+        temperature: config.AI_TEMPERATURE,
+        max_tokens: config.AI_MAX_TOKENS,
+        ...reasoningOptions(),
+        stream: true,
+        messages: [
+          {
+            role: 'system',
+            content: [
+              'You summarize Telegram group chats.',
+              'Before writing, check which human language is most prevalent in the provided message history and use that language for the summary.',
+              'Do not assume Russian or any other language from names, chat titles, Telegram UI, or prior context.',
+              'If the /summary request contains a plain-language language or style instruction, honor it naturally.',
+              'Do not require special command syntax for language selection.',
+              'Return Telegram-safe HTML only.',
+              'Allowed tags: <b>, <i>, <u>, <s>, <code>, <pre>, <a href="...">.',
+              'Do not use Markdown, headings, tables, images, or unsupported HTML tags.',
+              'Be concise, concrete, and useful.',
+              'Group related chatter into topics instead of listing messages one by one.',
+              'Do not invent facts that are not in the messages.',
+              'Avoid quoting private message text unless it is necessary for clarity.',
+              'When referencing a specific message, you may include a compact source link using the provided message URLs.',
+              'Only include links for the most relevant messages; do not link every message.',
+            ].join(' '),
+          },
+          {
+            role: 'user',
+            content: buildSummaryPrompt(params),
+          },
+        ],
+      }),
+    })
 
-  if (!response.ok) {
-    const body = await response.text()
-    throw new Error(
-      'LLM request failed: ' + response.status + ' ' + body.slice(0, 300)
-    )
+    if (!response.ok) {
+      const body = await response.text()
+      throw new Error(
+        'LLM request failed: ' + response.status + ' ' + body.slice(0, 300)
+      )
+    }
+
+    if (!response.body) {
+      throw new Error('LLM response did not contain a stream body')
+    }
+
+    let receivedContent = false
+    for await (const content of parseChatCompletionStream(response.body)) {
+      receivedContent ||= content.trim().length > 0
+      yield content
+    }
+
+    if (receivedContent) {
+      return
+    }
+
+    console.warn('LLM returned no visible summary content', { attempt })
   }
 
-  if (!response.body) {
-    throw new Error('LLM response did not contain a stream body')
-  }
-
-  yield* parseChatCompletionStream(response.body)
+  throw new Error('LLM returned no visible summary content after 2 attempts')
 }
 
 function buildSummaryPrompt(params: {

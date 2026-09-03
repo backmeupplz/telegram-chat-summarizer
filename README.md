@@ -1,6 +1,6 @@
 # Telegram Chat Summarizer
 
-Telegram group bot that stores incoming group messages in a local SQLite database and lets anyone in the group ask Kimi K2.6 Turbo for a summary of recent topics.
+Telegram group bot that stores incoming group messages in a local SQLite database and lets anyone in the group ask a configured OpenAI-compatible LLM for a summary of recent topics.
 
 Bot: [@chad_summary_bot](https://t.me/chad_summary_bot)
 
@@ -35,7 +35,7 @@ Copy `.env.example` to `.env` locally, or set these variables in Easypanel:
 - `SUMMARY_MAX_MESSAGES`
 - `AI_TEMPERATURE`
 - `AI_MAX_TOKENS`
-- `DISABLE_REASONING` (defaults to `true`; sends `chat_template_kwargs.enable_thinking=false` so reasoning models like MiMo return visible summary text instead of spending the budget on hidden chain-of-thought. Set to `false` to allow reasoning.)
+- `DISABLE_REASONING` (defaults to `true`; asks OpenRouter to use low reasoning effort and exclude reasoning tokens, while legacy endpoints receive their native disable-thinking flag. Set to `false` to use the selected model's default reasoning behavior.)
 
 Use a persistent volume for `DATABASE_PATH`, for example `/app/data/chat-summaries.sqlite`.
 
