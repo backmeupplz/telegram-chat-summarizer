@@ -7,7 +7,7 @@ process.env.LLM_BASE_URL = 'https://openrouter.example/api/v1'
 process.env.LLM_MODEL = 'openrouter/free'
 process.env.DATABASE_PATH = './data/test-ai.sqlite'
 
-const { reasoningOptions, summarizeMessages } = await import('../src/ai')
+const { looksLikeReasoningLeak, reasoningOptions, summarizeMessages } = await import('../src/ai')
 const originalFetch = globalThis.fetch
 
 const params = {
@@ -75,5 +75,37 @@ describe('summarizeMessages', () => {
       'LLM returned no visible summary content after 2 attempts'
     )
     expect(calls).toBe(2)
+  })
+
+  test('retries instead of publishing model reasoning as the summary', async () => {
+    let calls = 0
+    globalThis.fetch = (async () => {
+      calls += 1
+      return streamResponse(
+        calls === 1
+          ? "Here's a thinking process:\n\n1. Analyze User Input:\n- Chat name: Veydrift"
+          : '<b>Fleet update</b> Defenses are being rebuilt.'
+      )
+    }) as unknown as typeof fetch
+
+    expect(await summarizeMessages(params)).toBe(
+      '<b>Fleet update</b> Defenses are being rebuilt.'
+    )
+    expect(calls).toBe(2)
+  })
+
+  test('detects common reasoning wrappers', () => {
+    expect(looksLikeReasoningLeak("Here's a thinking process:\n1. Analyze the chat")).toBe(
+      true
+    )
+    expect(looksLikeReasoningLeak('<think>Analyze the chat</think>')).toBe(true)
+    expect(
+      looksLikeReasoningLeak(
+        '1. Analyze User Input:\n2. Determine Prevalent Language:\n3. Scan Messages for Key Topics:'
+      )
+    ).toBe(true)
+    expect(looksLikeReasoningLeak('<b>War and raids</b> Fleets are rebuilding.')).toBe(
+      false
+    )
   })
 })

@@ -102,20 +102,40 @@ export async function* streamSummaryMessages(params: {
       throw new Error('LLM response did not contain a stream body')
     }
 
-    let receivedContent = false
+    let candidate = ''
     for await (const content of parseChatCompletionStream(response.body)) {
-      receivedContent ||= content.trim().length > 0
-      yield content
+      candidate += content
     }
 
-    if (receivedContent) {
+    if (candidate.trim() && !looksLikeReasoningLeak(candidate)) {
+      yield candidate
       return
     }
 
-    console.warn('LLM returned no visible summary content', { attempt })
+    console.warn('LLM returned no usable visible summary content', {
+      attempt,
+      reason: candidate.trim() ? 'reasoning-leak' : 'empty',
+    })
   }
 
   throw new Error('LLM returned no visible summary content after 2 attempts')
+}
+
+export function looksLikeReasoningLeak(text: string) {
+  const normalized = text.trimStart()
+  const planningMarkers = [
+    /\banalyze user input\b/i,
+    /\bdetermine prevalent language\b/i,
+    /\bscan messages for (?:key )?topics\b/i,
+    /\boutput format:\s*telegram-safe html only\b/i,
+  ]
+  return (
+    /^(?:here(?:'|\u2019)s|here is)\s+(?:a|my|the)\s+(?:thinking|reasoning|analysis)\s+process\b/i.test(
+      normalized
+    ) ||
+    /^<(?:think|analysis)>/i.test(normalized) ||
+    planningMarkers.filter((marker) => marker.test(normalized)).length >= 2
+  )
 }
 
 function buildSummaryPrompt(params: {
