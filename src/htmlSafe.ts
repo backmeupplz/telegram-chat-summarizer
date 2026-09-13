@@ -85,6 +85,16 @@ export function sanitizeTelegramHtml(input: string): string {
   return result.join('')
 }
 
+export function normalizeModelTelegramHtml(input: string): string {
+  const normalized = input
+    .replace(/^\s{0,3}#{1,6}\s+(.+)$/gm, '<b>$1</b>')
+    .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
+    .replace(/__([^_\n]+)__/g, '<b>$1</b>')
+    .replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, '<a href="$2">$1</a>')
+
+  return sanitizeTelegramHtml(normalized)
+}
+
 export function fitTelegramHtml(text: string, limit = TELEGRAM_TEXT_LIMIT): string {
   if (text.length <= limit) {
     return text
