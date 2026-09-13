@@ -3,7 +3,7 @@ import { config } from './config'
 import { addMessage, ensureChat, getChatInfo, recentMessages } from './db'
 import { streamSummaryMessages } from './ai'
 import { resolveSummaryWindow } from './summaryArgs'
-import { sanitizeTelegramHtml, fitTelegramHtml } from './htmlSafe'
+import { normalizeModelTelegramHtml, fitTelegramHtml } from './htmlSafe'
 import { buildMessageLink, type ChatMetadata } from './links'
 
 export const botCommands = [
@@ -264,7 +264,7 @@ async function sendFinalSummary(ctx: Context, messageId: number, text: string) {
     return
   }
 
-  const safeHtml = sanitizeTelegramHtml(text)
+  const safeHtml = normalizeModelTelegramHtml(text)
   const fitted = fitTelegramHtml(safeHtml, TELEGRAM_HTML_LIMIT)
 
   try {

@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import { sanitizeTelegramHtml, fitTelegramHtml } from '../src/htmlSafe'
+import {
+  sanitizeTelegramHtml,
+  normalizeModelTelegramHtml,
+  fitTelegramHtml,
+} from '../src/htmlSafe'
 
 describe('sanitizeTelegramHtml', () => {
   test('allows safe tags', () => {
@@ -111,5 +115,30 @@ describe('fitTelegramHtml', () => {
     expect(result).not.toContain('</b>')
     expect(result.endsWith('\n\n[truncated]')).toBe(true)
     expect(result.length).toBeLessThanOrEqual(4096)
+  })
+})
+
+describe('normalizeModelTelegramHtml', () => {
+  test('converts screenshot-shaped Markdown into Telegram HTML', () => {
+    const input = [
+      '**Veydrift Group Chat Summary (Last 24h)**',
+      '',
+      '- **War & Raids**: Members are conducting frequent raids.',
+      '- **Resource Management**: Chucky is gathering debris.',
+    ].join('\n')
+
+    expect(normalizeModelTelegramHtml(input)).toBe([
+      '<b>Veydrift Group Chat Summary (Last 24h)</b>',
+      '',
+      '- <b>War &amp; Raids</b>: Members are conducting frequent raids.',
+      '- <b>Resource Management</b>: Chucky is gathering debris.',
+    ].join('\n'))
+  })
+
+  test('preserves safe HTML and normalizes Markdown message links', () => {
+    const input = '<b>Existing HTML</b> and [ref](https://t.me/mygroup/42)'
+    expect(normalizeModelTelegramHtml(input)).toBe(
+      '<b>Existing HTML</b> and <a href="https://t.me/mygroup/42">ref</a>'
+    )
   })
 })
