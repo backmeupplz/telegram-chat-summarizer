@@ -1,5 +1,7 @@
 import { readFile, stat, unlink, utimes, writeFile } from 'node:fs/promises'
 import { hostname } from 'node:os'
+import type { Bot, PollingOptions } from 'grammy'
+import type { Update } from 'grammy/types'
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -58,4 +60,45 @@ export async function pollWithHandover(
   process.once('SIGTERM', shutdown)
   process.once('SIGINT', shutdown)
   start()
+}
+
+/**
+ * grammY's `bot.start(options)` under the handover lock. `bot.stop()` aborts the long poll, but its
+ * confirming getUpdates repeats the offset just polled, and Telegram holds a getUpdates that repeats
+ * the previous one's offset within 3 s for up to 3 s. So while stopping, that call confirms the updates
+ * fetched but not yet confirmed at a fresh offset, or is skipped when there are none. `close` runs once
+ * the last fetched batch is handled.
+ */
+export function startWithHandover(bot: Bot<any>, options?: PollingOptions, close?: () => unknown) {
+  // Telegram has confirmed every update before `polled`; `fetched` is the newest update received
+  let polled = 0
+  let fetched = 0
+  let stopping = false
+  bot.api.config.use(async (prev, method, payload, signal) => {
+    if (method !== 'getUpdates') return prev(method, payload, signal)
+    if (stopping) {
+      if (fetched < polled) return { ok: true, result: [] } as any
+      payload = { ...payload, offset: fetched + 1, timeout: 0 }
+    }
+    polled = (payload as { offset?: number }).offset ?? 0
+    const response = await prev(method, payload, signal)
+    if (response.ok) {
+      for (const update of response.result as Update[]) fetched = Math.max(fetched, update.update_id)
+    }
+    return response
+  })
+  let polling: Promise<void> | undefined
+  return pollWithHandover(
+    () => {
+      polling = bot.start(options)
+    },
+    () => {
+      stopping = true
+      return bot.stop()
+    },
+    async () => {
+      await polling
+      await close?.()
+    }
+  )
 }
