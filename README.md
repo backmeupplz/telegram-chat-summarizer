@@ -41,7 +41,7 @@ Use a persistent volume for `DATABASE_PATH`, for example `/app/data/chat-summari
 
 ## Deployment
 
-Use Nixpacks on Hetzner Easypanel. Set the env vars above in Easypanel and mount a persistent data volume at `/app/data`.
+Build the Dockerfile (Bun 1.4.4), as Tugport does on Hetzner. Set the env vars above in the service and mount a persistent data volume at `/app/data`.
 
 ## Development
 
