@@ -7,6 +7,7 @@ Bot: [@chad_summary_bot](https://t.me/chad_summary_bot)
 ## What It Does
 
 - Stores incoming text, captions, and basic media placeholders separately per Telegram group.
+- In forum (topic) groups, `/summary` summarizes only the topic it is sent in (General covers non-topic messages).
 - Lets any group member run `/summary` for the last 24 hours, or pass a window like `/summary 7d` or `/summary 100`.
 - Uses the configured LLM endpoint for concise summaries.
 - Streams summaries by editing a plain-text placeholder message.

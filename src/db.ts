@@ -54,6 +54,7 @@ db.exec(`
 `)
 
 migrateSchema()
+db.exec('CREATE INDEX IF NOT EXISTS messages_chat_thread_id_idx ON messages(chat_id, thread_id, id)')
 
 function migrateSchema() {
   addColumnIfMissing('chats', 'username', 'username TEXT')
@@ -121,6 +122,8 @@ export function getChatInfo(chatId: number): ChatInfo | null {
 
 export function recentMessages(params: {
   chatId: number
+  // Forum topic id; null means non-topic messages (plain groups, General topic)
+  threadId: number | null
   limit: number
   sinceUnixSeconds?: number
 }): StoredMessage[] {
@@ -136,12 +139,14 @@ export function recentMessages(params: {
               thread_id AS threadId
        FROM messages
        WHERE chat_id = ?
+         AND thread_id IS ?
          AND (? IS NULL OR message_date >= ?)
        ORDER BY id DESC
        LIMIT ?`
     )
     .all(
       params.chatId,
+      params.threadId,
       params.sinceUnixSeconds ?? null,
       params.sinceUnixSeconds ?? null,
       params.limit

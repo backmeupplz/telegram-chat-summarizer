@@ -24,7 +24,7 @@ const helpText = [
   'I need permission to read normal group messages so I can build useful summaries.',
 ].join('\n')
 
-const runningSummaries = new Set<number>()
+const runningSummaries = new Set<string>()
 const SUMMARY_EDIT_INTERVAL_MS = 1200
 const SUMMARY_MIN_FIRST_EDIT_CHARS = 40
 const TELEGRAM_TEXT_LIMIT = 3900
@@ -107,15 +107,16 @@ async function sendSummary(ctx: Context) {
   }
 
   const threadId = topicThreadId(ctx)
+  const runKey = `${ctx.chat.id}:${threadId ?? ''}`
 
-  if (runningSummaries.has(ctx.chat.id)) {
-    await ctx.reply('A summary is already running for this group.', {
+  if (runningSummaries.has(runKey)) {
+    await ctx.reply(threadId ? 'A summary is already running for this topic.' : 'A summary is already running for this group.', {
       message_thread_id: threadId,
     })
     return
   }
 
-  runningSummaries.add(ctx.chat.id)
+  runningSummaries.add(runKey)
   let placeholderMessageId: number | null = null
   try {
     const placeholder = await ctx.reply('Summarizing...', {
@@ -133,6 +134,7 @@ async function sendSummary(ctx: Context) {
     })
     const messages = recentMessages({
       chatId: ctx.chat.id,
+      threadId: threadId ?? null,
       limit: window.limit,
       sinceUnixSeconds: window.sinceUnixSeconds,
     }).filter((message) => !message.text.startsWith('/summary'))
@@ -151,7 +153,7 @@ async function sendSummary(ctx: Context) {
     let accumulated = ''
     let lastEditAt = 0
     for await (const delta of streamSummaryMessages({
-      chatTitle: chatTitle(ctx),
+      chatTitle: summaryTitle(ctx),
       windowLabel: window.label,
       summaryRequest,
       messages,
@@ -182,7 +184,7 @@ async function sendSummary(ctx: Context) {
       await ctx.reply(message, { message_thread_id: threadId })
     }
   } finally {
-    runningSummaries.delete(ctx.chat.id)
+    runningSummaries.delete(runKey)
   }
 }
 
@@ -217,6 +219,13 @@ function topicThreadId(ctx: Context): number | undefined {
     return message.message_thread_id
   }
   return undefined
+}
+
+// Telegram attaches the topic's creation message as reply_to_message to topic
+// messages that aren't replies, which is the only cheap way to get its name.
+function summaryTitle(ctx: Context) {
+  const topicName = ctx.message?.reply_to_message?.forum_topic_created?.name
+  return topicName && topicThreadId(ctx) ? `${chatTitle(ctx)} / ${topicName}` : chatTitle(ctx)
 }
 
 function chatTitle(ctx: Context) {
