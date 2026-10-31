@@ -147,6 +147,10 @@ type StreamOutcome = {
   errorStatus: number | undefined
   // The stream stopped because the idle timeout or the attempt's cap fired.
   timedOut: TimeoutKind | null
+  // The body closed cleanly before the answer finished: no [DONE], no
+  // finish_reason and no error (an EOF-delimited body, or a proxy that closed
+  // the chunked body early). The text is a cut-off, not a full answer.
+  endedEarly: boolean
   malformedChunks: number
 }
 
@@ -243,8 +247,10 @@ export async function* streamSummaryMessages(
     } catch (error) {
       const failure = toSummaryLlmError(error)
       // A 400 right after raising the budget is most likely a context or
-      // max-output limit of the routed model: retry at the configured budget.
-      const budgetRejected = failure.status === 400 && maxTokens > config.AI_MAX_TOKENS
+      // max-output limit of the routed model, and OpenRouter answers a budget
+      // the account cannot afford with 402: retry at the configured budget.
+      const budgetRejected =
+        (failure.status === 400 || failure.status === 402) && maxTokens > config.AI_MAX_TOKENS
       const retryable =
         failure.status === undefined || RETRYABLE_STATUSES.has(failure.status) || budgetRejected
       attemptReasons.push(failure.status ? 'http-' + failure.status : 'request-error')
@@ -272,29 +278,39 @@ export async function* streamSummaryMessages(
     const candidate = outcome.content
     const readable = Boolean(candidate.trim()) && !looksLikeReasoningLeak(candidate)
     const visible = readable && !outcome.error
-    if (visible && outcome.finishReason !== 'length') {
+    if (visible && outcome.finishReason !== 'length' && !outcome.endedEarly) {
       yield candidate
       return
     }
-    // Text cut off by the token limit or the attempt timeout is the start of
-    // a real summary and is kept as a (marked) fallback for when no attempt
-    // finishes. A fragment that ended in a provider error is dropped, and so is
-    // one with nothing visible left once a half-written tag is removed.
-    const cutOff = readable && (outcome.timedOut || (visible && outcome.finishReason === 'length'))
+    // Text cut off by the token limit, the attempt timeout or an early end of
+    // the body is the start of a real summary and is kept as a (marked)
+    // fallback for when no attempt finishes. A fragment that ended in a
+    // provider error is dropped, and so is one with nothing visible left once a
+    // half-written tag is removed.
+    const cutOff =
+      readable &&
+      (outcome.timedOut ||
+        (visible && (outcome.finishReason === 'length' || outcome.endedEarly)))
     const cutOffText = cutOff ? publishableCutOff(candidate) : ''
     if (cutOffText.length > truncated.length) {
       truncated = cutOffText
     }
 
+    // A body that closed under readable text (or before any text) is a
+    // transport failure; reasoning that got cut short is still an unusable
+    // answer from the model.
+    const endedEarly = outcome.endedEarly && (readable || !candidate.trim())
     const reason = outcome.timedOut
       ? 'timeout-' + outcome.timedOut
       : outcome.error
         ? 'provider-error'
-        : visible
-          ? 'truncated'
-          : candidate.trim()
-            ? 'reasoning-leak'
-            : 'empty'
+        : endedEarly
+          ? 'ended-early'
+          : visible
+            ? 'truncated'
+            : candidate.trim()
+              ? 'reasoning-leak'
+              : 'empty'
     attemptReasons.push(reason)
     if (outcome.error) {
       lastFailure = new SummaryLlmError(
@@ -308,6 +324,11 @@ export async function* streamSummaryMessages(
       if (outcome.timedOut) {
         modelAnsweredUnusably = true
       }
+    } else if (endedEarly) {
+      // The connection closed under the answer: a transport failure, retried
+      // after a pause like a reset connection.
+      lastFailure = new SummaryLlmError('provider', 'LLM stream ended before the answer finished')
+      backoffMs = retryDelayMs(lastFailure)
     } else {
       modelAnsweredUnusably = true
       lastFailure = new SummaryLlmError('empty', 'LLM returned no visible summary content')
@@ -496,15 +517,11 @@ function buildSummaryPrompt(params: SummaryParams) {
   ].join('\n')
 }
 
-// A terminal finish_reason other than a cut-off or an error, with no error
-// chunk seen: the model's answer is complete.
+// A terminal finish_reason other than an error, with no error chunk seen: the
+// model is done writing ("length" included: that text is a complete cut-off),
+// so a later transport failure loses nothing.
 function finishedCleanly(outcome: StreamOutcome) {
-  return (
-    !outcome.error &&
-    outcome.finishReason !== null &&
-    outcome.finishReason !== 'length' &&
-    outcome.finishReason !== 'error'
-  )
+  return !outcome.error && outcome.finishReason !== null && outcome.finishReason !== 'error'
 }
 
 // Reads an OpenAI-compatible SSE stream. Besides the text it keeps the
@@ -525,6 +542,7 @@ export async function readChatCompletionStream(
     error: null,
     errorStatus: undefined,
     timedOut: null,
+    endedEarly: false,
     malformedChunks: 0,
   }
   const decoder = new TextDecoder()
@@ -587,8 +605,8 @@ export async function readChatCompletionStream(
       try {
         chunk = await reader.read()
       } catch (error) {
-        // The model already finished (e.g. "stop") and only the [DONE]
-        // sentinel was missing: the answer is complete, whatever happened to
+        // The model already finished (e.g. "stop" or "length") and only the
+        // [DONE] sentinel was missing: the answer is complete, whatever happened to
         // the connection afterwards.
         if (finishedCleanly(outcome)) {
           return outcome
@@ -622,7 +640,11 @@ export async function readChatCompletionStream(
     }
 
     buffer += decoder.decode()
-    handleLine(buffer)
+    // A provider that sends [DONE] without a finish_reason is complete; a
+    // body that just stops before either is a cut-off.
+    if (!handleLine(buffer) && outcome.finishReason === null && !outcome.error) {
+      outcome.endedEarly = true
+    }
     return outcome
   } finally {
     // Also drops the connection when [DONE] arrived before the body closed.

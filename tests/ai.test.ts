@@ -345,7 +345,8 @@ describe('summarizeMessages', () => {
         'data: {"choices":[{"delta":{"content":"Hello "}}]}\n\n' +
           'data: {not json\n\n' +
           ': OPENROUTER PROCESSING\n\n' +
-          'data: {"choices":[{"delta":{"content":"world"}}]}',
+          'data: {"choices":[{"delta":{"content":"world"}}]}\n\n' +
+          'data: [DONE]',
         { status: 200 }
       )) as unknown as typeof fetch
 
@@ -400,14 +401,113 @@ describe('summarizeMessages', () => {
     expect(calls).toBe(1)
   })
 
-  test('still treats a reset after finish_reason length as a cut-off', async () => {
+  test('keeps a length cut-off when the connection resets after the finish chunk', async () => {
+    const lengthChunk = (content: string) =>
+      `data: ${JSON.stringify({ choices: [{ delta: { content }, finish_reason: 'length' }] })}\n\n`
+    const outcome = await readChatCompletionStream(resetAfter(lengthChunk('Partial')))
+    expect(outcome.content).toBe('Partial')
+    expect(outcome.finishReason).toBe('length')
+    expect(outcome.error).toBeNull()
+
+    const texts = ['short cut', 'the longest cut-off text', 'mid cut-off']
+    const budgets: number[] = []
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      budgets.push(JSON.parse(String(init.body)).max_tokens)
+      return new Response(resetAfter(lengthChunk(texts[budgets.length - 1])), { status: 200 })
+    }) as unknown as typeof fetch
+
+    expect(await summarizeMessages(params, fast)).toBe('the longest cut-off text' + CUT_OFF_NOTE)
+    expect(budgets).toEqual([1800, 3600, 7200])
+    expect(delays).toEqual([])
+  })
+
+  test('still fails a length chunk that came with an error when the connection then resets', async () => {
     const outcome = await readChatCompletionStream(
       resetAfter(
-        `data: ${JSON.stringify({ choices: [{ delta: { content: 'Partial' }, finish_reason: 'length' }] })}\n\n`
+        `data: ${JSON.stringify({ error: { code: 502, message: 'Upstream died' }, choices: [{ delta: { content: 'Partial' }, finish_reason: 'length' }] })}\n\n`
       )
     )
-    expect(outcome.content).toBe('Partial')
+    expect(outcome.finishReason).toBe('length')
     expect(outcome.error).toContain('stream read failed')
+  })
+
+  test('treats a body that closes cleanly before the answer finished as a cut-off and retries', async () => {
+    const outcome = await readChatCompletionStream(new Response(delta('<b>Topic</b> half a')).body!)
+    expect(outcome.content).toBe('<b>Topic</b> half a')
+    expect(outcome.endedEarly).toBe(true)
+    expect(outcome.error).toBeNull()
+
+    let calls = 0
+    globalThis.fetch = (async () => {
+      calls += 1
+      return calls === 1 ? new Response(delta('<b>Topic</b> half a')) : streamResponse('<b>Topic</b> Whole.')
+    }) as unknown as typeof fetch
+
+    expect(await summarizeMessages(params, fast)).toBe('<b>Topic</b> Whole.')
+    expect(calls).toBe(2)
+    expect(delays).toEqual([2000])
+  })
+
+  test('publishes the longest early-ended answer with the cut-off note when no attempt finishes', async () => {
+    const texts = ['first cut', 'the longest early-ended text', 'mid text']
+    let calls = 0
+    globalThis.fetch = (async () => {
+      const content = texts[calls]
+      calls += 1
+      return new Response(delta(content))
+    }) as unknown as typeof fetch
+
+    expect(await summarizeMessages(params, fast)).toBe('the longest early-ended text' + CUT_OFF_NOTE)
+    expect(calls).toBe(3)
+  })
+
+  test('reports a provider failure when every body closes before any text', async () => {
+    let calls = 0
+    globalThis.fetch = (async () => {
+      calls += 1
+      return new Response(': OPENROUTER PROCESSING\n\n')
+    }) as unknown as typeof fetch
+
+    const error = await summarizeMessages(params, fast).catch((e) => e)
+    expect(error).toBeInstanceOf(SummaryLlmError)
+    expect(error.kind).toBe('provider')
+    expect(error.message).toContain('ended before the answer finished')
+    expect(calls).toBe(3)
+  })
+
+  test('still reports leaked reasoning as an unusable answer when its body closes early', async () => {
+    let calls = 0
+    globalThis.fetch = (async () => {
+      calls += 1
+      return new Response(delta('<think>Analyze the chat and'))
+    }) as unknown as typeof fetch
+
+    const error = await summarizeMessages(params, fast).catch((e) => e)
+    expect(error).toBeInstanceOf(SummaryLlmError)
+    expect(error.kind).toBe('empty')
+    expect(summaryFailureMessage(error)).toContain('no usable answer')
+    expect(calls).toBe(3)
+    expect(delays).toEqual([])
+  })
+
+  test('accepts [DONE] without a finish_reason, and a finish_reason without [DONE], as complete', async () => {
+    for (const body of [
+      delta('No finish reason') + 'data: [DONE]',
+      delta('No finish reason') + 'data: [DONE]\n\n',
+      `data: ${JSON.stringify({ choices: [{ delta: { content: 'No sentinel' }, finish_reason: 'stop' }] })}\n\n`,
+    ]) {
+      const outcome = await readChatCompletionStream(new Response(body).body!)
+      expect(outcome.endedEarly).toBe(false)
+      expect(outcome.error).toBeNull()
+    }
+
+    let calls = 0
+    globalThis.fetch = (async () => {
+      calls += 1
+      return new Response(delta('No finish reason') + 'data: [DONE]')
+    }) as unknown as typeof fetch
+    expect(await summarizeMessages(params, fast)).toBe('No finish reason')
+    expect(calls).toBe(1)
   })
 
   test('does not retry a non-retryable provider status', async () => {
@@ -461,6 +561,20 @@ describe('summarizeMessages', () => {
 
     expect(await summarizeMessages(params, fast)).toBe('Fits now')
     expect(budgets).toEqual([1800, 3600, 1800])
+  })
+
+  test('falls back to the configured budget when a raised budget is unaffordable (402)', async () => {
+    const budgets: number[] = []
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      budgets.push(JSON.parse(String(init.body)).max_tokens)
+      if (budgets.length === 1) return sse([{ choices: [{ delta: {}, finish_reason: 'length' }] }])
+      if (budgets.length === 2) return new Response('insufficient credits for max_tokens', { status: 402 })
+      return streamResponse('Fits now')
+    }) as unknown as typeof fetch
+
+    expect(await summarizeMessages(params, fast)).toBe('Fits now')
+    expect(budgets).toEqual([1800, 3600, 1800])
+    expect(delays).toEqual([])
   })
 
   test('does not retry a 400 at the configured budget', async () => {
