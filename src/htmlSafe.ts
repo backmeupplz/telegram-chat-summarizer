@@ -95,6 +95,45 @@ export function normalizeModelTelegramHtml(input: string): string {
   return sanitizeTelegramHtml(normalized)
 }
 
+// Marks a summary that was cut off by the token limit or the attempt timeout.
+export const CUT_OFF_NOTE = '\n\n<i>(summary cut off)</i>'
+
+// Tags a model may start: the allowed ones plus common HTML the sanitizer drops.
+const KNOWN_TAGS = [
+  ...ALLOWED_TAGS,
+  'br', 'p', 'li', 'ul', 'ol', 'span', 'blockquote', 'tg-spoiler',
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+]
+
+// Drops a tag the model was cut off half-way through (`<cod`, `</a`, `<li`,
+// `<a href="https://t.me/x`, `<a href="…"`), but keeps prose such as
+// `a<b then c` or `<3`.
+export function stripHalfWrittenTag(text: string): string {
+  const match = text.match(/<(\/?)([a-zA-Z][a-zA-Z0-9-]*|)(\s[^<>]*)?$/)
+  if (!match) {
+    return text
+  }
+  const name = match[2].toLowerCase()
+  const attrs = match[3]
+  const halfTag = attrs === undefined
+    ? KNOWN_TAGS.some((tag) => tag.startsWith(name))
+    : KNOWN_TAGS.includes(name) && !match[1] &&
+      /^(?:\s+[a-z-]+\s*=\s*(?:"[^"]*"|'[^']*'))*\s*(?:[a-z-]+(?:\s*=\s*(?:"[^"]*|'[^']*)?)?)?$/i.test(attrs)
+  return halfTag ? text.slice(0, match.index) : text
+}
+
+// Renders model output as Telegram HTML. A trailing cut-off note is split off
+// and appended after sanitizing, so it never ends up inside a tag the cut-off
+// text left open (bold, or an entity nested in <code>/<pre>).
+export function renderSummaryHtml(text: string): string {
+  const note = CUT_OFF_NOTE.trim()
+  if (!text.endsWith(note)) {
+    return normalizeModelTelegramHtml(text)
+  }
+  const body = normalizeModelTelegramHtml(text.slice(0, -note.length).trimEnd())
+  return body ? body + '\n\n' + note : note
+}
+
 export function fitTelegramHtml(text: string, limit = TELEGRAM_TEXT_LIMIT): string {
   if (text.length <= limit) {
     return text

@@ -35,7 +35,7 @@ Copy `.env.example` to `.env` locally, or set these variables in Easypanel:
 - `SUMMARY_DEFAULT_MESSAGES`
 - `SUMMARY_MAX_MESSAGES`
 - `AI_TEMPERATURE`
-- `AI_MAX_TOKENS`
+- `AI_MAX_TOKENS` (defaults to `1800`; the first attempt's completion budget. Reasoning models spend hidden reasoning out of it, so when an answer is cut off before any visible text (`finish_reason: length`) the bot retries with double the budget, up to 3 attempts and 16000 tokens. Provider errors (429/5xx, network, timeouts) are retried after a short pause that honours `Retry-After` up to 5 s. An attempt is aborted when the stream goes quiet for 60 s (3 min before the first visible text; keepalive comments count as activity) or after 5 min (more for raised budgets), and all attempts together stop after 10 min. If no attempt finishes, the longest answer cut off by the token limit or a timeout is posted with a "(summary cut off)" note; an attempt that used its whole time cap while still writing is posted right away instead of retried.)
 - `DISABLE_REASONING` (defaults to `true`; asks OpenRouter to use low reasoning effort and exclude reasoning tokens, while legacy endpoints receive their native disable-thinking flag. Set to `false` to use the selected model's default reasoning behavior.)
 
 Use a persistent volume for `DATABASE_PATH`, for example `/app/data/chat-summaries.sqlite`.

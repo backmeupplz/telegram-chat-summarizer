@@ -2,8 +2,9 @@ import { Bot, type Context } from 'grammy'
 import { config } from './config'
 import { addMessage, ensureChat, getChatInfo, recentMessages } from './db'
 import { streamSummaryMessages } from './ai'
+import { summaryFailureMessage } from './summaryFailure'
 import { resolveSummaryWindow } from './summaryArgs'
-import { normalizeModelTelegramHtml, fitTelegramHtml } from './htmlSafe'
+import { renderSummaryHtml, fitTelegramHtml } from './htmlSafe'
 import { buildMessageLink, type ChatMetadata } from './links'
 
 export const botCommands = [
@@ -177,7 +178,7 @@ async function sendSummary(ctx: Context) {
       chatId: ctx.chat.id,
       error: error instanceof Error ? error.message : String(error),
     })
-    const message = 'Summary failed. Check the bot logs for the LLM or Telegram error.'
+    const message = summaryFailureMessage(error)
     if (placeholderMessageId) {
       await editSummaryMessagePlain(ctx, placeholderMessageId, message)
     } else {
@@ -272,7 +273,7 @@ async function sendFinalSummary(ctx: Context, messageId: number, text: string) {
     return
   }
 
-  const safeHtml = normalizeModelTelegramHtml(text)
+  const safeHtml = renderSummaryHtml(text)
   const fitted = fitTelegramHtml(safeHtml, TELEGRAM_HTML_LIMIT)
 
   try {

@@ -3,6 +3,9 @@ import {
   sanitizeTelegramHtml,
   normalizeModelTelegramHtml,
   fitTelegramHtml,
+  renderSummaryHtml,
+  stripHalfWrittenTag,
+  CUT_OFF_NOTE,
 } from '../src/htmlSafe'
 
 describe('sanitizeTelegramHtml', () => {
@@ -140,5 +143,58 @@ describe('normalizeModelTelegramHtml', () => {
     expect(normalizeModelTelegramHtml(input)).toBe(
       '<b>Existing HTML</b> and <a href="https://t.me/mygroup/42">ref</a>'
     )
+  })
+})
+
+describe('renderSummaryHtml', () => {
+  const note = '<i>(summary cut off)</i>'
+
+  test('leaves a summary without the cut-off note alone', () => {
+    expect(renderSummaryHtml('<b>Topic</b> & more')).toBe(normalizeModelTelegramHtml('<b>Topic</b> & more'))
+  })
+
+  test('appends the note at top level after a cut inside <b>', () => {
+    expect(renderSummaryHtml('<b>Topic one: the long discu' + CUT_OFF_NOTE)).toBe(
+      '<b>Topic one: the long discu</b>\n\n' + note
+    )
+  })
+
+  test('appends the note outside an open <code> or <pre>', () => {
+    expect(renderSummaryHtml('<code>foo bar' + CUT_OFF_NOTE)).toBe('<code>foo bar</code>\n\n' + note)
+    expect(renderSummaryHtml('<pre>x y' + CUT_OFF_NOTE)).toBe('<pre>x y</pre>\n\n' + note)
+  })
+
+  test('appends the note outside an open <a href>', () => {
+    expect(renderSummaryHtml('see <a href="https://t.me/hypersnap/12">this mess' + CUT_OFF_NOTE)).toBe(
+      'see <a href="https://t.me/hypersnap/12">this mess</a>\n\n' + note
+    )
+  })
+
+  test('escapes & once', () => {
+    expect(renderSummaryHtml('A & B' + CUT_OFF_NOTE)).toBe('A &amp; B\n\n' + note)
+  })
+})
+
+describe('stripHalfWrittenTag', () => {
+  test('drops a half-written allowed tag', () => {
+    expect(stripHalfWrittenTag('x <cod')).toBe('x ')
+    expect(stripHalfWrittenTag('x </a')).toBe('x ')
+    expect(stripHalfWrittenTag('x <')).toBe('x ')
+    expect(stripHalfWrittenTag('x <a href="https://t.me/c')).toBe('x ')
+    expect(stripHalfWrittenTag("x <a href='https")).toBe('x ')
+    expect(stripHalfWrittenTag('x <a href="https://t.me/x/1"')).toBe('x ')
+    expect(stripHalfWrittenTag('x <code class="language-py')).toBe('x ')
+    expect(stripHalfWrittenTag('x <b ')).toBe('x ')
+    expect(stripHalfWrittenTag('x <li')).toBe('x ')
+    expect(stripHalfWrittenTag('x <blockquo')).toBe('x ')
+    expect(stripHalfWrittenTag('x <tg-spoi')).toBe('x ')
+  })
+
+  test('keeps prose with a <', () => {
+    expect(stripHalfWrittenTag('if a<b then the team picks c')).toBe('if a<b then the team picks c')
+    expect(stripHalfWrittenTag('team <a lot of them')).toBe('team <a lot of them')
+    expect(stripHalfWrittenTag('yes <3 no')).toBe('yes <3 no')
+    expect(stripHalfWrittenTag('x < y')).toBe('x < y')
+    expect(stripHalfWrittenTag('a <table')).toBe('a <table')
   })
 })
