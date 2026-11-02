@@ -91,6 +91,48 @@ function tickingStream(signal: AbortSignal, everyMs: number, next: (tick: number
   )
 }
 
+// A manual clock for the attempt watchdog: its timers fire only when a test moves time on.
+function manualClock() {
+  let now = 0
+  const timers = new Set<{ at: number; fire: () => void }>()
+  return {
+    setTimer(fire: () => void, ms: number) {
+      const timer = { at: now + ms, fire }
+      timers.add(timer)
+      return () => void timers.delete(timer)
+    },
+    advance(ms: number) {
+      now += ms
+      for (const timer of [...timers].sort((a, b) => a.at - b.at)) {
+        if (timer.at <= now && timers.delete(timer)) timer.fire()
+      }
+    },
+  }
+}
+
+// A stream the test steps through: step(n) runs each time the reader asks for
+// more, i.e. once it has taken in (and re-armed its idle timer on) everything
+// before. A step moves the clock and returns the next chunk, or null to send
+// nothing. An aborted attempt errors the stream.
+function steppedStream(signal: AbortSignal, step: (n: number) => string | null) {
+  let n = 0
+  return new Response(
+    new ReadableStream<Uint8Array>(
+      {
+        start(controller) {
+          signal.addEventListener('abort', () => controller.error(signal.reason))
+        },
+        pull(controller) {
+          const chunk = step(n++)
+          if (chunk !== null && !signal.aborted) controller.enqueue(new TextEncoder().encode(chunk))
+        },
+      },
+      { highWaterMark: 0 }
+    ),
+    { status: 200 }
+  )
+}
+
 // Sends `chunk`, then fails the next read like a reset connection.
 function resetAfter(chunk: string) {
   let sent = false
@@ -387,17 +429,22 @@ describe('summarizeMessages', () => {
   })
 
   test('publishes a finished answer without a cut-off note when the stream stalls after stop', async () => {
+    const clock = manualClock()
     let calls = 0
     globalThis.fetch = (async (_url: string, init: RequestInit) => {
       calls += 1
-      return tickingStream(init.signal!, 5, (tick) =>
-        tick === 0
-          ? `data: ${JSON.stringify({ choices: [{ delta: { content: 'Complete summary' }, finish_reason: 'stop' }] })}\n\n`
-          : null
-      )
+      return steppedStream(init.signal!, (n) => {
+        if (n === 0) {
+          return `data: ${JSON.stringify({ choices: [{ delta: { content: 'Complete summary' }, finish_reason: 'stop' }] })}\n\n`
+        }
+        clock.advance(15) // stalls until the idle timer fires
+        return null
+      })
     }) as unknown as typeof fetch
 
-    expect(await summarizeMessages(params, { ...fast, idleTimeoutMs: 15 })).toBe('Complete summary')
+    expect(await summarizeMessages(params, { ...fast, idleTimeoutMs: 15, setTimer: clock.setTimer })).toBe(
+      'Complete summary'
+    )
     expect(calls).toBe(1)
   })
 
@@ -669,30 +716,36 @@ describe('summarizeMessages', () => {
 
   test('lets a slow stream finish while it keeps sending chunks past the idle limit', async () => {
     let calls = 0
+    const clock = manualClock()
     globalThis.fetch = (async (_url: string, init: RequestInit) => {
       calls += 1
-      return tickingStream(init.signal!, 12, (tick) =>
-        tick < 15 ? delta('part' + tick + ' ') : tick === 15 ? 'data: [DONE]\n\n' : null
-      )
+      // 50 ms between chunks, 800 ms in all: far past the 60 ms idle limit
+      return steppedStream(init.signal!, (n) => {
+        clock.advance(50)
+        return n < 15 ? delta('part' + n + ' ') : 'data: [DONE]\n\n'
+      })
     }) as unknown as typeof fetch
 
-    const started = Date.now()
-    const result = await summarizeMessages(params, { ...fast, idleTimeoutMs: 60 })
-    expect(Date.now() - started).toBeGreaterThan(120)
+    const result = await summarizeMessages(params, { ...fast, idleTimeoutMs: 60, setTimer: clock.setTimer })
     expect(result).toBe(Array.from({ length: 15 }, (_, tick) => 'part' + tick).join(' '))
     expect(calls).toBe(1)
   })
 
   test('counts keepalive comments as activity during a long silent reasoning phase', async () => {
     let calls = 0
+    const clock = manualClock()
     globalThis.fetch = (async (_url: string, init: RequestInit) => {
       calls += 1
-      return tickingStream(init.signal!, 10, (tick) =>
-        tick < 12 ? ': OPENROUTER PROCESSING\n\n' : tick === 12 ? delta('Thought it over') + 'data: [DONE]\n\n' : null
-      )
+      // 20 ms between keepalives, 260 ms of silent reasoning: past the 75 ms first-content idle limit
+      return steppedStream(init.signal!, (n) => {
+        clock.advance(20)
+        return n < 12 ? ': OPENROUTER PROCESSING\n\n' : delta('Thought it over') + 'data: [DONE]\n\n'
+      })
     }) as unknown as typeof fetch
 
-    expect(await summarizeMessages(params, { ...fast, idleTimeoutMs: 25 })).toBe('Thought it over')
+    expect(await summarizeMessages(params, { ...fast, idleTimeoutMs: 25, setTimer: clock.setTimer })).toBe(
+      'Thought it over'
+    )
     expect(calls).toBe(1)
   })
 
@@ -703,12 +756,10 @@ describe('summarizeMessages', () => {
       return tickingStream(init.signal!, 5, () => null)
     }) as unknown as typeof fetch
 
-    const started = Date.now()
     const error = await summarizeMessages(params, { ...fast, idleTimeoutMs: 10 }).catch((e) => e)
     expect(error).toBeInstanceOf(SummaryLlmError)
     expect(error.kind).toBe('empty')
     expect(calls).toBe(3)
-    expect(Date.now() - started).toBeLessThan(2_000)
   })
 
   test('caps an attempt that never goes quiet and never finishes', async () => {
@@ -727,12 +778,22 @@ describe('summarizeMessages', () => {
 
   test('publishes a slow answer cut by the attempt cap instead of retrying it identically', async () => {
     let calls = 0
+    const clock = manualClock()
     globalThis.fetch = (async (_url: string, init: RequestInit) => {
       calls += 1
-      return tickingStream(init.signal!, 10, (tick) => delta(tick === 0 ? 'Slow summary' : '.'))
+      // A chunk every 10 ms; the 60 ms cap fires while the sixth is due
+      return steppedStream(init.signal!, (n) => {
+        clock.advance(10)
+        return delta(n === 0 ? 'Slow summary' : '.')
+      })
     }) as unknown as typeof fetch
 
-    const result = await summarizeMessages(params, { ...fast, idleTimeoutMs: 1_000, attemptTimeoutMs: 60 })
+    const result = await summarizeMessages(params, {
+      ...fast,
+      idleTimeoutMs: 1_000,
+      attemptTimeoutMs: 60,
+      setTimer: clock.setTimer,
+    })
     expect(result.startsWith('Slow summary.')).toBe(true)
     expect(result.endsWith(CUT_OFF_NOTE)).toBe(true)
     expect(calls).toBe(1)

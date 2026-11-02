@@ -62,19 +62,27 @@ export function attemptTimeoutMs(maxTokens: number) {
 
 type TimeoutKind = 'idle' | 'deadline'
 
+// Arms a one-shot timer and returns its cancel. Tests pass a manual clock.
+type SetTimer = (fire: () => void, ms: number) => () => void
+const realTimer: SetTimer = (fire, ms) => {
+  const timer = setTimeout(fire, ms)
+  return () => clearTimeout(timer)
+}
+
 // Aborts an attempt when its stream has been idle too long or its hard cap is
 // reached, and remembers which of the two fired.
 class AttemptWatchdog {
   readonly controller = new AbortController()
   fired: TimeoutKind | null = null
-  private idleTimer: ReturnType<typeof setTimeout> | undefined
-  private readonly hardTimer: ReturnType<typeof setTimeout>
+  private cancelIdle = () => {}
+  private readonly cancelHard: () => void
 
   constructor(
     private readonly idleMs: number,
-    hardMs: number
+    hardMs: number,
+    private readonly setTimer: SetTimer = realTimer
   ) {
-    this.hardTimer = setTimeout(() => this.fire('deadline'), hardMs)
+    this.cancelHard = setTimer(() => this.fire('deadline'), hardMs)
     this.touch(false)
   }
 
@@ -84,17 +92,17 @@ class AttemptWatchdog {
 
   // Called whenever the upstream shows progress.
   touch(hasContent: boolean) {
-    clearTimeout(this.idleTimer)
+    this.cancelIdle()
     if (this.fired) {
       return
     }
     const limit = hasContent ? this.idleMs : this.idleMs * FIRST_CONTENT_IDLE_FACTOR
-    this.idleTimer = setTimeout(() => this.fire('idle'), limit)
+    this.cancelIdle = this.setTimer(() => this.fire('idle'), limit)
   }
 
   dispose() {
-    clearTimeout(this.idleTimer)
-    clearTimeout(this.hardTimer)
+    this.cancelIdle()
+    this.cancelHard()
   }
 
   private fire(kind: TimeoutKind) {
@@ -183,6 +191,7 @@ type SummaryOptions = {
   idleTimeoutMs?: number
   deadlineMs?: number
   sleep?: (ms: number) => Promise<void>
+  setTimer?: SetTimer
 }
 
 // The text of a cut-off answer worth publishing: without a tag the model was
@@ -243,6 +252,7 @@ export async function* streamSummaryMessages(
       outcome = await requestSummaryStream(params, maxTokens, {
         idleMs: options.idleTimeoutMs ?? IDLE_TIMEOUT_MS,
         hardMs: Math.min(options.attemptTimeoutMs ?? attemptTimeoutMs(maxTokens), remainingMs),
+        setTimer: options.setTimer,
       })
     } catch (error) {
       const failure = toSummaryLlmError(error)
@@ -391,10 +401,10 @@ function toSummaryLlmError(error: unknown) {
 async function requestSummaryStream(
   params: SummaryParams,
   maxTokens: number,
-  limits: { idleMs: number; hardMs: number }
+  limits: { idleMs: number; hardMs: number; setTimer?: SetTimer }
 ): Promise<StreamOutcome> {
   // The watchdog covers the whole attempt, including reading the stream body.
-  const watchdog = new AttemptWatchdog(limits.idleMs, limits.hardMs)
+  const watchdog = new AttemptWatchdog(limits.idleMs, limits.hardMs, limits.setTimer)
   try {
     return await sendSummaryRequest(params, maxTokens, watchdog)
   } finally {
